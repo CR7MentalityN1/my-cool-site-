@@ -252,7 +252,9 @@ export function ProjectsFeed() {
 				created_at: new Date().toISOString(),
 			}
 
-			const { error } = await (supabase as any).from('projects').insert([insertData])
+			const { error } = await (supabase as any)
+				.from('projects')
+				.insert([insertData])
 
 			if (error) {
 				console.error('Error creating project:', error)
