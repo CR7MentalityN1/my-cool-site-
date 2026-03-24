@@ -18,13 +18,35 @@ import type { Database } from '../../lib/database.types'
 type Project = Database['public']['Tables']['projects']['Row']
 type ProjectApplication =
 	Database['public']['Tables']['project_applications']['Row']
-type ProjectInsert = Database['public']['Tables']['projects']['Insert']
-type ProjectUpdate = Database['public']['Tables']['projects']['Update']
-type ProjectApplicationInsert =
-	Database['public']['Tables']['project_applications']['Insert']
-type ProjectApplicationUpdate =
-	Database['public']['Tables']['project_applications']['Update']
 type ProfileRow = Database['public']['Tables']['profiles']['Row']
+
+// Custom insert types for proper typing
+interface ProjectInsertData {
+	title: string
+	description: string | null
+	owner_id: string
+	required_roles: string[]
+	current_members: string[]
+	image_url: string | null
+	created_at: string
+}
+
+interface ProjectApplicationInsertData {
+	project_id: string
+	user_id: string
+	status: 'pending' | 'accepted' | 'rejected'
+	created_at: string
+}
+
+interface ProjectUpdateData {
+	current_members?: string[]
+	description?: string | null
+	required_roles?: string[]
+}
+
+interface ProjectApplicationUpdateData {
+	status?: 'pending' | 'accepted' | 'rejected'
+}
 
 interface CreateProjectForm {
 	title: string
@@ -173,10 +195,10 @@ export function ProjectsFeed() {
 		}
 
 		try {
-			const insertData: ProjectApplicationInsert = {
+			const insertData: ProjectApplicationInsertData = {
 				project_id: projectId,
 				user_id: user.id,
-				status: 'pending' as const,
+				status: 'pending',
 				created_at: new Date().toISOString(),
 			}
 
@@ -220,7 +242,7 @@ export function ProjectsFeed() {
 			const userFullName = user.user_metadata?.full_name || 'Участник'
 			const currentMembers = [userFullName]
 
-			const insertData: ProjectInsert = {
+			const insertData: ProjectInsertData = {
 				title: createFormData.title,
 				description: createFormData.description || null,
 				owner_id: user.id,
@@ -320,7 +342,9 @@ export function ProjectsFeed() {
 			const updatedMembers = [...currentMembers, applicantName]
 
 			// Update project with new member
-			const projectUpdateData: ProjectUpdate = { current_members: updatedMembers }
+			const projectUpdateData: ProjectUpdateData = {
+				current_members: updatedMembers,
+			}
 			const { error: updateError } = await supabase
 				.from('projects')
 				.update(projectUpdateData)
@@ -329,7 +353,9 @@ export function ProjectsFeed() {
 			if (updateError) throw updateError
 
 			// Update application status to accepted
-			const applicationUpdateData: ProjectApplicationUpdate = { status: 'accepted' as const }
+			const applicationUpdateData: ProjectApplicationUpdateData = {
+				status: 'accepted',
+			}
 			const { error: statusError } = await supabase
 				.from('project_applications')
 				.update(applicationUpdateData)
@@ -362,7 +388,9 @@ export function ProjectsFeed() {
 
 		try {
 			// Update application status to rejected
-			const applicationUpdateData: ProjectApplicationUpdate = { status: 'rejected' as const }
+			const applicationUpdateData: ProjectApplicationUpdateData = {
+				status: 'rejected',
+			}
 			const { error } = await supabase
 				.from('project_applications')
 				.update(applicationUpdateData)
@@ -410,7 +438,7 @@ export function ProjectsFeed() {
 				.map(role => role.trim())
 				.filter(role => role.length > 0)
 
-			const projectUpdateData: ProjectUpdate = {
+			const projectUpdateData: ProjectUpdateData = {
 				description: adminEditForm.description || null,
 				required_roles: rolesArray,
 			}
