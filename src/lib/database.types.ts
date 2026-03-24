@@ -110,21 +110,21 @@ export interface Database {
 					id: string
 					project_id: string
 					user_id: string
-					status: string
+					status: 'pending' | 'accepted' | 'rejected'
 					created_at: string
 				}
 				Insert: {
 					id?: string
 					project_id: string
 					user_id: string
-					status?: string
+					status?: 'pending' | 'accepted' | 'rejected'
 					created_at?: string
 				}
 				Update: {
 					id?: string
 					project_id?: string
 					user_id?: string
-					status?: string
+					status?: 'pending' | 'accepted' | 'rejected'
 					created_at?: string
 				}
 			}

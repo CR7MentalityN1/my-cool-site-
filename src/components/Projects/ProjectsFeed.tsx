@@ -100,9 +100,7 @@ export function ProjectsFeed() {
 		for (const project of projects) {
 			if (user.id === project.owner_id) {
 				statuses[project.id] = 'owner'
-			} else if (
-				project.current_members?.includes(userFullName)
-			) {
+			} else if (project.current_members?.includes(userFullName)) {
 				statuses[project.id] = 'in_team'
 			} else {
 				// Check if has application
@@ -262,8 +260,8 @@ export function ProjectsFeed() {
 			if (error) {
 				console.error('Error fetching applications:', error)
 			} else {
-				const apps = (data || []) as any
-				
+				const apps = (data || []) as ProjectApplication[]
+
 				// Fetch profile data for applicants
 				const appsWithProfiles: ApplicationWithProfile[] = []
 				for (const app of apps) {
@@ -276,15 +274,15 @@ export function ProjectsFeed() {
 
 						appsWithProfiles.push({
 							...app,
-							applicantName: profileData?.name || 'Участник',
-							applicantFaculty: profileData?.faculty || 'Не указано',
-						})
+							applicantName: (profileData?.name as string) || 'Участник',
+							applicantFaculty: (profileData?.faculty as string) || 'Не указано',
+						} as ApplicationWithProfile)
 					} catch {
 						appsWithProfiles.push({
 							...app,
 							applicantName: 'Участник',
 							applicantFaculty: 'Не указано',
-						})
+						} as ApplicationWithProfile)
 					}
 				}
 				setApplications(appsWithProfiles)
@@ -296,12 +294,14 @@ export function ProjectsFeed() {
 		setIsAdminModalOpen(true)
 	}
 
-	const handleAcceptApplication = async (application: ApplicationWithProfile) => {
+	const handleAcceptApplication = async (
+		application: ApplicationWithProfile,
+	) => {
 		if (!selectedProject || !user) return
 
 		try {
 			const applicantName = application.applicantName || 'Участник'
-			
+
 			// Check for duplicates before adding
 			const currentMembers = selectedProject.current_members || []
 			if (currentMembers.includes(applicantName)) {
@@ -329,13 +329,13 @@ export function ProjectsFeed() {
 
 			alert('Заявка принята!')
 			setApplications(applications.filter(app => app.id !== application.id))
-			
+
 			// Update selected project
 			setSelectedProject({
 				...selectedProject,
 				current_members: updatedMembers,
 			})
-			
+
 			// Refresh projects and statuses
 			fetchProjects()
 			checkUserStatusForAllProjects()
@@ -345,7 +345,9 @@ export function ProjectsFeed() {
 		}
 	}
 
-	const handleRejectApplication = async (application: ApplicationWithProfile) => {
+	const handleRejectApplication = async (
+		application: ApplicationWithProfile,
+	) => {
 		if (!selectedProject) return
 
 		try {
@@ -604,9 +606,7 @@ export function ProjectsFeed() {
 								</div>
 							</div>
 
-							<div className='flex gap-3'>
-								{renderProjectButton(project)}
-							</div>
+							<div className='flex gap-3'>{renderProjectButton(project)}</div>
 						</div>
 					))}
 				</div>
