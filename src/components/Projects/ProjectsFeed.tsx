@@ -202,7 +202,7 @@ export function ProjectsFeed() {
 				created_at: new Date().toISOString(),
 			}
 
-			const { error } = await supabase
+			const { error } = await (supabase as any)
 				.from('project_applications')
 				.insert([insertData])
 
@@ -252,7 +252,7 @@ export function ProjectsFeed() {
 				created_at: new Date().toISOString(),
 			}
 
-			const { error } = await supabase.from('projects').insert([insertData])
+			const { error } = await (supabase as any).from('projects').insert([insertData])
 
 			if (error) {
 				console.error('Error creating project:', error)
@@ -345,7 +345,7 @@ export function ProjectsFeed() {
 			const projectUpdateData: ProjectUpdateData = {
 				current_members: updatedMembers,
 			}
-			const { error: updateError } = await supabase
+			const { error: updateError } = await (supabase as any)
 				.from('projects')
 				.update(projectUpdateData)
 				.eq('id', selectedProject.id)
@@ -356,7 +356,7 @@ export function ProjectsFeed() {
 			const applicationUpdateData: ProjectApplicationUpdateData = {
 				status: 'accepted',
 			}
-			const { error: statusError } = await supabase
+			const { error: statusError } = await (supabase as any)
 				.from('project_applications')
 				.update(applicationUpdateData)
 				.eq('id', application.id)
@@ -391,7 +391,7 @@ export function ProjectsFeed() {
 			const applicationUpdateData: ProjectApplicationUpdateData = {
 				status: 'rejected',
 			}
-			const { error } = await supabase
+			const { error } = await (supabase as any)
 				.from('project_applications')
 				.update(applicationUpdateData)
 				.eq('id', application.id)
@@ -443,7 +443,7 @@ export function ProjectsFeed() {
 				required_roles: rolesArray,
 			}
 
-			const { error } = await supabase
+			const { error } = await (supabase as any)
 				.from('projects')
 				.update(projectUpdateData)
 				.eq('id', selectedProject.id)
