@@ -18,7 +18,7 @@ import type { Database } from '../../lib/database.types'
 type Project = Database['public']['Tables']['projects']['Row']
 type ProjectApplication =
 	Database['public']['Tables']['project_applications']['Row']
-type Profile = Database['public']['Tables']['profiles']['Row']
+type ProfileRow = Database['public']['Tables']['profiles']['Row']
 
 interface CreateProjectForm {
 	title: string
@@ -167,13 +167,13 @@ export function ProjectsFeed() {
 		}
 
 		try {
-			const { error } = await (supabase as any)
+			const { error } = await supabase
 				.from('project_applications')
 				.insert([
 					{
 						project_id: projectId,
 						user_id: user.id,
-						status: 'pending',
+						status: 'pending' as const,
 						created_at: new Date().toISOString(),
 					},
 				])
@@ -214,7 +214,7 @@ export function ProjectsFeed() {
 			const userFullName = user.user_metadata?.full_name || 'Участник'
 			const currentMembers = [userFullName]
 
-			const { error } = await (supabase as any).from('projects').insert([
+			const { error } = await supabase.from('projects').insert([
 				{
 					title: createFormData.title,
 					description: createFormData.description || null,
@@ -272,17 +272,19 @@ export function ProjectsFeed() {
 							.eq('auth_id', app.user_id)
 							.maybeSingle()
 
+						const typedProfileData = profileData as ProfileRow | null
+
 						appsWithProfiles.push({
 							...app,
-							applicantName: (profileData?.name as string) || 'Участник',
-							applicantFaculty: (profileData?.faculty as string) || 'Не указано',
-						} as ApplicationWithProfile)
+							applicantName: typedProfileData?.name || 'Участник',
+							applicantFaculty: typedProfileData?.faculty || 'Не указано',
+						})
 					} catch {
 						appsWithProfiles.push({
 							...app,
 							applicantName: 'Участник',
 							applicantFaculty: 'Не указано',
-						} as ApplicationWithProfile)
+						})
 					}
 				}
 				setApplications(appsWithProfiles)
@@ -312,7 +314,7 @@ export function ProjectsFeed() {
 			const updatedMembers = [...currentMembers, applicantName]
 
 			// Update project with new member
-			const { error: updateError } = await (supabase as any)
+			const { error: updateError } = await supabase
 				.from('projects')
 				.update({ current_members: updatedMembers })
 				.eq('id', selectedProject.id)
@@ -322,7 +324,7 @@ export function ProjectsFeed() {
 			// Update application status to accepted
 			const { error: statusError } = await supabase
 				.from('project_applications')
-				.update({ status: 'accepted' })
+				.update({ status: 'accepted' as const })
 				.eq('id', application.id)
 
 			if (statusError) throw statusError
@@ -354,7 +356,7 @@ export function ProjectsFeed() {
 			// Update application status to rejected
 			const { error } = await supabase
 				.from('project_applications')
-				.update({ status: 'rejected' })
+				.update({ status: 'rejected' as const })
 				.eq('id', application.id)
 
 			if (error) throw error
@@ -399,7 +401,7 @@ export function ProjectsFeed() {
 				.map(role => role.trim())
 				.filter(role => role.length > 0)
 
-			const { error } = await (supabase as any)
+			const { error } = await supabase
 				.from('projects')
 				.update({
 					description: adminEditForm.description || null,
