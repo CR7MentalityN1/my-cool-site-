@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import { Search, Users, X, Plus } from 'lucide-react'
+import { Search, Users, X, Plus, Settings, UserPlus, Trash2 } from 'lucide-react'
 import type { Database } from '../../lib/database.types'
 
-type Project = Database['public']['Tables']['projects']['Row'] & {
-	owner?: { name?: string }
-}
+type Project = Database['public']['Tables']['projects']['Row']
+type ProjectApplication = Database['public']['Tables']['project_applications']['Row']
 
 interface CreateProjectForm {
 	title: string
+	description: string
+	roles: string
+}
+
+interface AdminEditForm {
 	description: string
 	roles: string
 }
@@ -20,8 +24,16 @@ export function ProjectsFeed() {
 	const [filteredProjects, setFilteredProjects] = useState<Project[]>([])
 	const [loading, setLoading] = useState(true)
 	const [searchQuery, setSearchQuery] = useState('')
-	const [isModalOpen, setIsModalOpen] = useState(false)
-	const [formData, setFormData] = useState<CreateProjectForm>({
+	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+	const [isAdminModalOpen, setIsAdminModalOpen] = useState(false)
+	const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+	const [applications, setApplications] = useState<ProjectApplication[]>([])
+	const [applicantNames, setApplicantNames] = useState<Record<string, string>>({})
+	const [adminEditForm, setAdminEditForm] = useState<AdminEditForm>({
+		description: '',
+		roles: '',
+	})
+	const [createFormData, setCreateFormData] = useState<CreateProjectForm>({
 		title: '',
 		description: '',
 		roles: '',
@@ -100,7 +112,7 @@ export function ProjectsFeed() {
 			return
 		}
 
-		if (!formData.title.trim()) {
+		if (!createFormData.title.trim()) {
 			alert('Укажите название проекта')
 			return
 		}
@@ -108,7 +120,7 @@ export function ProjectsFeed() {
 		setIsSubmitting(true)
 
 		try {
-			const rolesArray = formData.roles
+			const rolesArray = createFormData.roles
 				.split(',')
 				.map(role => role.trim())
 				.filter(role => role.length > 0)
@@ -118,8 +130,8 @@ export function ProjectsFeed() {
 
 			const { error } = await (supabase as any).from('projects').insert([
 				{
-					title: formData.title,
-					description: formData.description || null,
+					title: createFormData.title,
+					description: createFormData.description || null,
 					owner_id: user.id,
 					required_roles: rolesArray,
 					current_members: currentMembers,
@@ -133,8 +145,8 @@ export function ProjectsFeed() {
 				alert('Ошибка при создании проекта')
 			} else {
 				alert('Проект успешно создан!')
-				setFormData({ title: '', description: '', roles: '' })
-				setIsModalOpen(false)
+				setCreateFormData({ title: '', description: '', roles: '' })
+				setIsCreateModalOpen(false)
 				fetchProjects()
 			}
 		} catch (error) {
@@ -145,11 +157,159 @@ export function ProjectsFeed() {
 		}
 	}
 
-	const handleFormChange = (
+	const openAdminModal = async (project: Project) => {
+		setSelectedProject(project)
+		setAdminEditForm({
+			description: project.description || '',
+			roles: project.required_roles?.join(', ') || '',
+		})
+
+		try {
+			const { data, error } = await supabase
+				.from('project_applications')
+				.select('*')
+				.eq('project_id', project.id)
+				.eq('status', 'pending')
+
+			if (error) {
+				console.error('Error fetching applications:', error)
+			} else {
+				const apps = (data || []) as any
+				setApplications(apps)
+				
+				// Fetch applicant names
+				const names: Record<string, string> = {}
+				for (const app of apps) {
+					try {
+						const { data: userData } = await supabase.auth.admin.getUserById(app.user_id)
+						if (userData?.user?.user_metadata?.full_name) {
+							names[app.user_id] = userData.user.user_metadata.full_name
+						} else {
+							names[app.user_id] = 'Участник'
+						}
+					} catch {
+						names[app.user_id] = 'Участник'
+					}
+				}
+				setApplicantNames(names)
+			}
+		} catch (error) {
+			console.error('Error:', error)
+		}
+
+		setIsAdminModalOpen(true)
+	}
+
+	const handleAcceptApplication = async (application: ProjectApplication) => {
+		if (!selectedProject || !user) return
+
+		try {
+			const applicantName = applicantNames[application.user_id] || 'Участник'
+			const updatedMembers = [...(selectedProject.current_members || []), applicantName]
+
+			// Update project with new member
+			const { error: updateError } = await (supabase as any)
+				.from('projects')
+				.update({ current_members: updatedMembers })
+				.eq('id', selectedProject.id)
+
+			if (updateError) throw updateError
+
+			// Delete application
+			const { error: deleteError } = await supabase
+				.from('project_applications')
+				.delete()
+				.eq('id', application.id)
+
+			if (deleteError) throw deleteError
+
+			alert('Заявка принята!')
+			setApplications(applications.filter(app => app.id !== application.id))
+			
+			// Update selected project
+			setSelectedProject({
+				...selectedProject,
+				current_members: updatedMembers,
+			})
+			
+			// Refresh projects
+			fetchProjects()
+		} catch (error) {
+			console.error('Error accepting application:', error)
+			alert('Ошибка при принятии заявки')
+		}
+	}
+
+	const handleDeleteProject = async () => {
+		if (!selectedProject || !user) return
+
+		if (!confirm('Вы уверены? Это действие нельзя отменить.')) return
+
+		try {
+			const { error } = await supabase
+				.from('projects')
+				.delete()
+				.eq('id', selectedProject.id)
+
+			if (error) throw error
+
+			alert('Проект удален!')
+			setIsAdminModalOpen(false)
+			setSelectedProject(null)
+			fetchProjects()
+		} catch (error) {
+			console.error('Error deleting project:', error)
+			alert('Ошибка при удалении проекта')
+		}
+	}
+
+	const handleUpdateProject = async () => {
+		if (!selectedProject || !user) return
+
+		try {
+			const rolesArray = adminEditForm.roles
+				.split(',')
+				.map(role => role.trim())
+				.filter(role => role.length > 0)
+
+			const { error } = await (supabase as any)
+				.from('projects')
+				.update({
+					description: adminEditForm.description || null,
+					required_roles: rolesArray,
+				})
+				.eq('id', selectedProject.id)
+
+			if (error) throw error
+
+			alert('Проект обновлен!')
+			setSelectedProject({
+				...selectedProject,
+				description: adminEditForm.description,
+				required_roles: rolesArray,
+			})
+			fetchProjects()
+		} catch (error) {
+			console.error('Error updating project:', error)
+			alert('Ошибка при обновлении проекта')
+		}
+	}
+
+	const handleAdminFormChange = (
 		e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
 	) => {
 		const { name, value } = e.target
-		setFormData(prev => ({
+		setAdminEditForm(prev => ({
+			...prev,
+			[name]: value,
+		}))
+	}
+
+	const handleCreateFormChange = (
+		e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+	) => {
+		const { name, value } = e.target
+		setCreateFormData(prev => ({
 			...prev,
 			[name]: value,
 		}))
@@ -185,7 +345,7 @@ export function ProjectsFeed() {
 						</div>
 					</div>
 					<button
-						onClick={() => setIsModalOpen(true)}
+						onClick={() => setIsCreateModalOpen(true)}
 						className='bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center gap-2'
 					>
 						<Plus className='w-5 h-5' />
@@ -257,16 +417,21 @@ export function ProjectsFeed() {
 							</div>
 
 							<div className='flex gap-3'>
-								<button
-									onClick={() => handleApply(project.id)}
-									className='flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition'
-								>
-									Подать заявку
-								</button>
-
-								{user && user.id === project.owner_id && (
-									<button className='flex-1 bg-gray-600 text-white py-2 rounded-lg font-bold hover:bg-gray-700 transition'>
+								{user && user.id === project.owner_id ? (
+									<button
+										onClick={() => openAdminModal(project)}
+										className='flex-1 bg-gray-600 text-white py-2 rounded-lg font-bold hover:bg-gray-700 transition flex items-center justify-center gap-2'
+									>
+										<Settings className='w-4 h-4' />
 										Управление
+									</button>
+								) : (
+									<button
+										onClick={() => handleApply(project.id)}
+										className='flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2'
+									>
+										<UserPlus className='w-4 h-4' />
+										Подать заявку
 									</button>
 								)}
 							</div>
@@ -275,15 +440,16 @@ export function ProjectsFeed() {
 				</div>
 			)}
 
-			{isModalOpen && (
+			{/* Create Project Modal */}
+			{isCreateModalOpen && (
 				<div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50'>
-					<div className='bg-white rounded-lg shadow-xl max-w-md w-full'>
-						<div className='flex items-center justify-between p-6 border-b'>
+					<div className='bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto'>
+						<div className='flex items-center justify-between p-6 border-b sticky top-0 bg-white'>
 							<h2 className='text-2xl font-bold text-gray-800'>
 								Создать проект
 							</h2>
 							<button
-								onClick={() => setIsModalOpen(false)}
+								onClick={() => setIsCreateModalOpen(false)}
 								className='text-gray-500 hover:text-gray-700 transition'
 							>
 								<X className='w-6 h-6' />
@@ -298,8 +464,8 @@ export function ProjectsFeed() {
 								<input
 									type='text'
 									name='title'
-									value={formData.title}
-									onChange={handleFormChange}
+									value={createFormData.title}
+									onChange={handleCreateFormChange}
 									placeholder='Введите название'
 									className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 									required
@@ -312,8 +478,8 @@ export function ProjectsFeed() {
 								</label>
 								<textarea
 									name='description'
-									value={formData.description}
-									onChange={handleFormChange}
+									value={createFormData.description}
+									onChange={handleCreateFormChange}
 									placeholder='Опишите ваш проект'
 									rows={4}
 									className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none'
@@ -327,8 +493,8 @@ export function ProjectsFeed() {
 								<input
 									type='text'
 									name='roles'
-									value={formData.roles}
-									onChange={handleFormChange}
+									value={createFormData.roles}
+									onChange={handleCreateFormChange}
 									placeholder='Frontend, Backend, Design (через запятую)'
 									className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 								/>
@@ -340,7 +506,7 @@ export function ProjectsFeed() {
 							<div className='flex gap-3 pt-4'>
 								<button
 									type='button'
-									onClick={() => setIsModalOpen(false)}
+									onClick={() => setIsCreateModalOpen(false)}
 									className='flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-bold hover:bg-gray-50 transition'
 									disabled={isSubmitting}
 								>
@@ -355,6 +521,124 @@ export function ProjectsFeed() {
 								</button>
 							</div>
 						</form>
+					</div>
+				</div>
+			)}
+
+			{/* Admin Management Modal */}
+			{isAdminModalOpen && selectedProject && (
+				<div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50'>
+					<div className='bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto'>
+						<div className='flex items-center justify-between p-6 border-b sticky top-0 bg-white'>
+							<h2 className='text-2xl font-bold text-gray-800'>
+								Управление проектом
+							</h2>
+							<button
+								onClick={() => setIsAdminModalOpen(false)}
+								className='text-gray-500 hover:text-gray-700 transition'
+							>
+								<X className='w-6 h-6' />
+							</button>
+						</div>
+
+						<div className='p-6 space-y-6'>
+							{/* Edit Project Info */}
+							<div>
+								<h3 className='text-lg font-bold text-gray-800 mb-4'>
+									Редактирование проекта
+								</h3>
+								<div className='space-y-4'>
+									<div>
+										<label className='block text-sm font-medium text-gray-700 mb-2'>
+											Описание
+										</label>
+										<textarea
+											name='description'
+											value={adminEditForm.description}
+											onChange={handleAdminFormChange}
+											placeholder='Описание проекта'
+											rows={3}
+											className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none'
+										/>
+									</div>
+
+									<div>
+										<label className='block text-sm font-medium text-gray-700 mb-2'>
+											Необходимые роли
+										</label>
+										<input
+											type='text'
+											name='roles'
+											value={adminEditForm.roles}
+											onChange={handleAdminFormChange}
+											placeholder='Frontend, Backend, Design'
+											className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+										/>
+									</div>
+
+									<button
+										onClick={handleUpdateProject}
+										className='w-full bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition'
+									>
+										Сохранить изменения
+									</button>
+								</div>
+							</div>
+
+							{/* Applications */}
+							<div className='border-t pt-6'>
+								<h3 className='text-lg font-bold text-gray-800 mb-4'>
+									Заявки ({applications.length})
+								</h3>
+								{applications.length === 0 ? (
+									<p className='text-gray-600'>Нет новых заявок</p>
+								) : (
+									<div className='space-y-3'>
+										{applications.map(app => (
+											<div
+												key={app.id}
+												className='flex items-center justify-between bg-gray-50 p-4 rounded-lg'
+											>
+												<div>
+													<p className='font-medium text-gray-800'>
+														{applicantNames[app.user_id] || 'Участник'}
+													</p>
+													<p className='text-xs text-gray-500'>
+														Статус: {app.status}
+													</p>
+												</div>
+												<button
+													onClick={() => handleAcceptApplication(app)}
+													className='bg-green-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-green-700 transition'
+												>
+													Принять
+												</button>
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+
+							{/* Delete Project */}
+							<div className='border-t pt-6'>
+								<button
+									onClick={handleDeleteProject}
+									className='w-full bg-red-600 text-white py-2 rounded-lg font-bold hover:bg-red-700 transition flex items-center justify-center gap-2'
+								>
+									<Trash2 className='w-4 h-4' />
+									Удалить проект
+								</button>
+							</div>
+
+							<div className='flex gap-3 pt-4'>
+								<button
+									onClick={() => setIsAdminModalOpen(false)}
+									className='flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-bold hover:bg-gray-50 transition'
+								>
+									Закрыть
+								</button>
+							</div>
+						</div>
 					</div>
 				</div>
 			)}
