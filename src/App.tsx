@@ -7,12 +7,13 @@ import { RegisterForm } from './components/Auth/RegisterForm'
 import { ProfileForm } from './components/Profile/ProfileForm'
 import { StudentsFeed } from './components/Feed/StudentsFeed'
 import { Chat } from './components/Chat/Chat'
+import { ProjectsFeed } from './components/Projects/ProjectsFeed'
 
 function App() {
 	const { user, loading } = useAuth()
 	const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
 	const [currentPage, setCurrentPage] = useState<
-		'landing' | 'feed' | 'profile' | 'chat'
+		'landing' | 'feed' | 'profile' | 'chat' | 'projects'
 	>('landing')
 
 	if (loading) {
@@ -58,6 +59,7 @@ function App() {
 			/>
 			<main>
 				{currentPage === 'feed' && <StudentsFeed />}
+				{currentPage === 'projects' && <ProjectsFeed />}
 				{currentPage === 'profile' && <ProfileForm />}
 				{currentPage === 'chat' && <Chat />}
 			</main>

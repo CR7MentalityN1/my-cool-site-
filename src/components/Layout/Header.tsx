@@ -3,6 +3,7 @@ import {
 	MessageCircle,
 	CircleUser as UserCircle,
 	LogOut,
+	FolderKanban,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 
@@ -34,6 +35,18 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 					</button>
 
 					<nav className='flex items-center space-x-6'>
+						<button
+							onClick={() => onNavigate('projects')}
+							className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
+								currentPage === 'projects'
+									? 'bg-blue-600 text-white'
+									: 'text-gray-700 hover:bg-gray-100'
+							}`}
+						>
+							<FolderKanban className='w-5 h-5' />
+							<span className='font-medium'>Проекты</span>
+						</button>
+
 						<button
 							onClick={() => onNavigate('feed')}
 							className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
