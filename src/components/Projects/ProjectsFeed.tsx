@@ -1,11 +1,20 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import { Search, Users, X, Plus, Settings, UserPlus, Trash2 } from 'lucide-react'
+import {
+	Search,
+	Users,
+	X,
+	Plus,
+	Settings,
+	UserPlus,
+	Trash2,
+} from 'lucide-react'
 import type { Database } from '../../lib/database.types'
 
 type Project = Database['public']['Tables']['projects']['Row']
-type ProjectApplication = Database['public']['Tables']['project_applications']['Row']
+type ProjectApplication =
+	Database['public']['Tables']['project_applications']['Row']
 
 interface CreateProjectForm {
 	title: string
@@ -28,7 +37,9 @@ export function ProjectsFeed() {
 	const [isAdminModalOpen, setIsAdminModalOpen] = useState(false)
 	const [selectedProject, setSelectedProject] = useState<Project | null>(null)
 	const [applications, setApplications] = useState<ProjectApplication[]>([])
-	const [applicantNames, setApplicantNames] = useState<Record<string, string>>({})
+	const [applicantNames, setApplicantNames] = useState<Record<string, string>>(
+		{},
+	)
 	const [adminEditForm, setAdminEditForm] = useState<AdminEditForm>({
 		description: '',
 		roles: '',
@@ -176,12 +187,14 @@ export function ProjectsFeed() {
 			} else {
 				const apps = (data || []) as any
 				setApplications(apps)
-				
+
 				// Fetch applicant names
 				const names: Record<string, string> = {}
 				for (const app of apps) {
 					try {
-						const { data: userData } = await supabase.auth.admin.getUserById(app.user_id)
+						const { data: userData } = await supabase.auth.admin.getUserById(
+							app.user_id,
+						)
 						if (userData?.user?.user_metadata?.full_name) {
 							names[app.user_id] = userData.user.user_metadata.full_name
 						} else {
@@ -205,7 +218,10 @@ export function ProjectsFeed() {
 
 		try {
 			const applicantName = applicantNames[application.user_id] || 'Участник'
-			const updatedMembers = [...(selectedProject.current_members || []), applicantName]
+			const updatedMembers = [
+				...(selectedProject.current_members || []),
+				applicantName,
+			]
 
 			// Update project with new member
 			const { error: updateError } = await (supabase as any)
@@ -225,13 +241,13 @@ export function ProjectsFeed() {
 
 			alert('Заявка принята!')
 			setApplications(applications.filter(app => app.id !== application.id))
-			
+
 			// Update selected project
 			setSelectedProject({
 				...selectedProject,
 				current_members: updatedMembers,
 			})
-			
+
 			// Refresh projects
 			fetchProjects()
 		} catch (error) {
