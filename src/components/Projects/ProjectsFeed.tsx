@@ -46,6 +46,7 @@ interface ProjectUpdateData {
 	current_members?: string[]
 	description?: string | null
 	required_roles?: string[]
+	image_url?: string | null
 }
 
 interface ProjectApplicationUpdateData {
@@ -62,6 +63,7 @@ interface CreateProjectForm {
 interface AdminEditForm {
 	description: string
 	roles: string
+	image_url: string
 }
 
 interface ApplicationWithProfile extends ProjectApplication {
@@ -86,6 +88,7 @@ export function ProjectsFeed() {
 	const [adminEditForm, setAdminEditForm] = useState<AdminEditForm>({
 		description: '',
 		roles: '',
+		image_url: '',
 	})
 	const [createFormData, setCreateFormData] = useState<CreateProjectForm>({
 		title: '',
@@ -97,14 +100,36 @@ export function ProjectsFeed() {
 	const [userProjectStatuses, setUserProjectStatuses] = useState<
 		Record<string, UserProjectStatus>
 	>({})
+	const [currentUserName, setCurrentUserName] = useState<string>('')
 
 	useEffect(() => {
 		fetchProjects()
 	}, [])
 
 	useEffect(() => {
+		if (user) {
+			const fetchUserName = async () => {
+				try {
+					const { data } = await supabase
+						.from('profiles')
+						.select('name')
+						.eq('auth_id', user.id)
+						.single()
+					const typedData = data as { name: string | null } | null
+					setCurrentUserName(
+						typedData?.name || user.user_metadata?.full_name || '',
+					)
+				} catch {
+					setCurrentUserName(user.user_metadata?.full_name || '')
+				}
+			}
+			fetchUserName()
+		}
+	}, [user])
+
+	useEffect(() => {
 		applyFilters()
-	}, [projects, searchQuery, filterMode, user])
+	}, [projects, searchQuery, filterMode, user, currentUserName])
 
 	useEffect(() => {
 		if (user && projects.length > 0) {
@@ -163,12 +188,11 @@ export function ProjectsFeed() {
 		if (!user) return
 
 		const statuses: Record<string, UserProjectStatus> = {}
-		const userFullName = user.user_metadata?.full_name || ''
 
 		for (const project of projects) {
 			if (user.id === project.owner_id) {
 				statuses[project.id] = 'owner'
-			} else if (project.current_members?.includes(userFullName)) {
+			} else if (project.current_members?.includes(currentUserName)) {
 				statuses[project.id] = 'in_team'
 			} else {
 				// Check if has application
@@ -195,10 +219,10 @@ export function ProjectsFeed() {
 		let filtered = projects
 
 		if (filterMode === 'my' && user) {
-			const userFullName = user.user_metadata?.full_name || ''
 			filtered = filtered.filter(
 				p =>
-					p.owner_id === user.id || p.current_members?.includes(userFullName),
+					p.owner_id === user.id ||
+					p.current_members?.includes(currentUserName),
 			)
 		}
 
@@ -287,7 +311,15 @@ export function ProjectsFeed() {
 				.map(role => role.trim())
 				.filter(role => role.length > 0)
 
-			const userFullName = user.user_metadata?.full_name || 'Участник'
+			// Get user name from profiles
+			const { data: profile } = await supabase
+				.from('profiles')
+				.select('name')
+				.eq('auth_id', user.id)
+				.single()
+			const typedProfile = profile as { name: string | null } | null
+			const userFullName =
+				typedProfile?.name || user.user_metadata?.full_name || 'Участник'
 			const currentMembers = [userFullName]
 
 			const insertData: ProjectInsertData = {
@@ -331,6 +363,7 @@ export function ProjectsFeed() {
 		setAdminEditForm({
 			description: project.description || '',
 			roles: project.required_roles?.join(', ') || '',
+			image_url: project.image_url || '',
 		})
 
 		try {
@@ -501,6 +534,7 @@ export function ProjectsFeed() {
 			const projectUpdateData: ProjectUpdateData = {
 				description: adminEditForm.description || null,
 				required_roles: rolesArray,
+				image_url: adminEditForm.image_url || null,
 			}
 
 			const { error } = await (supabase as any)
@@ -515,6 +549,7 @@ export function ProjectsFeed() {
 				...selectedProject,
 				description: adminEditForm.description,
 				required_roles: rolesArray,
+				image_url: adminEditForm.image_url,
 			})
 			fetchProjects()
 		} catch (error) {
@@ -881,6 +916,23 @@ export function ProjectsFeed() {
 											rows={3}
 											className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none'
 										/>
+									</div>
+
+									<div>
+										<label className='block text-sm font-medium text-gray-700 mb-2'>
+											Ссылка на обложку
+										</label>
+										<input
+											type='url'
+											name='image_url'
+											value={adminEditForm.image_url}
+											onChange={handleAdminFormChange}
+											placeholder='https://example.com/image.jpg'
+											className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+										/>
+										<p className='text-xs text-gray-500 mt-1'>
+											Оставьте пустым для стандартной заглушки
+										</p>
 									</div>
 
 									<div>
