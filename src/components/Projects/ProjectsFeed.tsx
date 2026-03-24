@@ -15,7 +15,11 @@ import {
 } from 'lucide-react'
 import type { Database } from '../../lib/database.types'
 
-type Project = Database['public']['Tables']['projects']['Row']
+type Project = Database['public']['Tables']['projects']['Row'] & {
+	profiles?: {
+		full_name: string | null
+	}
+}
 type ProjectApplication =
 	Database['public']['Tables']['project_applications']['Row']
 type ProfileRow = Database['public']['Tables']['profiles']['Row']
@@ -52,6 +56,7 @@ interface CreateProjectForm {
 	title: string
 	description: string
 	roles: string
+	image_url: string
 }
 
 interface AdminEditForm {
@@ -72,10 +77,12 @@ export function ProjectsFeed() {
 	const [filteredProjects, setFilteredProjects] = useState<Project[]>([])
 	const [loading, setLoading] = useState(true)
 	const [searchQuery, setSearchQuery] = useState('')
+	const [filterMode, setFilterMode] = useState<'all' | 'my'>('all')
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 	const [isAdminModalOpen, setIsAdminModalOpen] = useState(false)
 	const [selectedProject, setSelectedProject] = useState<Project | null>(null)
 	const [applications, setApplications] = useState<ApplicationWithProfile[]>([])
+	const [isViewModalOpen, setIsViewModalOpen] = useState(false)
 	const [adminEditForm, setAdminEditForm] = useState<AdminEditForm>({
 		description: '',
 		roles: '',
@@ -84,6 +91,7 @@ export function ProjectsFeed() {
 		title: '',
 		description: '',
 		roles: '',
+		image_url: '',
 	})
 	const [isSubmitting, setIsSubmitting] = useState(false)
 	const [userProjectStatuses, setUserProjectStatuses] = useState<
@@ -96,7 +104,7 @@ export function ProjectsFeed() {
 
 	useEffect(() => {
 		applyFilters()
-	}, [projects, searchQuery])
+	}, [projects, searchQuery, filterMode, user])
 
 	useEffect(() => {
 		if (user && projects.length > 0) {
@@ -114,7 +122,39 @@ export function ProjectsFeed() {
 		if (error) {
 			console.error('Error fetching projects:', error)
 		} else {
-			setProjects(data || [])
+			// Fetch owner names
+			const projectsWithOwners = await Promise.all(
+				((data as Database['public']['Tables']['projects']['Row'][]) || []).map(
+					async project => {
+						try {
+							const { data: profileData } = await supabase
+								.from('profiles')
+								.select('name')
+								.eq('auth_id', project.owner_id)
+								.maybeSingle()
+
+							const typedProfileData = profileData as {
+								name: string | null
+							} | null
+
+							return {
+								...project,
+								profiles: {
+									full_name: typedProfileData?.name || null,
+								},
+							} as Project
+						} catch {
+							return {
+								...project,
+								profiles: {
+									full_name: null,
+								},
+							} as Project
+						}
+					},
+				),
+			)
+			setProjects(projectsWithOwners)
 		}
 		setLoading(false)
 	}
@@ -153,6 +193,14 @@ export function ProjectsFeed() {
 
 	const applyFilters = () => {
 		let filtered = projects
+
+		if (filterMode === 'my' && user) {
+			const userFullName = user.user_metadata?.full_name || ''
+			filtered = filtered.filter(
+				p =>
+					p.owner_id === user.id || p.current_members?.includes(userFullName),
+			)
+		}
 
 		if (searchQuery) {
 			const query = searchQuery.toLowerCase()
@@ -248,7 +296,7 @@ export function ProjectsFeed() {
 				owner_id: user.id,
 				required_roles: rolesArray,
 				current_members: currentMembers,
-				image_url: null,
+				image_url: createFormData.image_url || null,
 				created_at: new Date().toISOString(),
 			}
 
@@ -261,7 +309,12 @@ export function ProjectsFeed() {
 				alert('Ошибка при создании проекта')
 			} else {
 				alert('Проект успешно создан!')
-				setCreateFormData({ title: '', description: '', roles: '' })
+				setCreateFormData({
+					title: '',
+					description: '',
+					roles: '',
+					image_url: '',
+				})
 				setIsCreateModalOpen(false)
 				fetchProjects()
 			}
@@ -324,6 +377,11 @@ export function ProjectsFeed() {
 		}
 
 		setIsAdminModalOpen(true)
+	}
+
+	const openViewModal = (project: Project) => {
+		setSelectedProject(project)
+		setIsViewModalOpen(true)
 	}
 
 	const handleAcceptApplication = async (
@@ -576,13 +634,37 @@ export function ProjectsFeed() {
 						</div>
 					</div>
 					{user && (
-						<button
-							onClick={() => setIsCreateModalOpen(true)}
-							className='bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center gap-2'
-						>
-							<Plus className='w-5 h-5' />
-							Создать проект
-						</button>
+						<div className='flex gap-2'>
+							<div className='flex rounded-lg border border-gray-300'>
+								<button
+									onClick={() => setFilterMode('all')}
+									className={`px-4 py-2 rounded-l-lg font-medium transition ${
+										filterMode === 'all'
+											? 'bg-blue-600 text-white'
+											: 'bg-white text-gray-700 hover:bg-gray-50'
+									}`}
+								>
+									Все проекты
+								</button>
+								<button
+									onClick={() => setFilterMode('my')}
+									className={`px-4 py-2 rounded-r-lg font-medium transition ${
+										filterMode === 'my'
+											? 'bg-blue-600 text-white'
+											: 'bg-white text-gray-700 hover:bg-gray-50'
+									}`}
+								>
+									Мои проекты
+								</button>
+							</div>
+							<button
+								onClick={() => setIsCreateModalOpen(true)}
+								className='bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center gap-2'
+							>
+								<Plus className='w-5 h-5' />
+								Создать проект
+							</button>
+						</div>
 					)}
 				</div>
 			</div>
@@ -596,14 +678,19 @@ export function ProjectsFeed() {
 					{filteredProjects.map(project => (
 						<div
 							key={project.id}
-							className='bg-white rounded-lg shadow-md hover:shadow-lg transition p-6'
+							className='bg-white rounded-lg shadow-md hover:shadow-lg transition p-6 cursor-pointer'
+							onClick={() => openViewModal(project)}
 						>
-							{project.image_url && (
+							{project.image_url ? (
 								<img
 									src={project.image_url}
 									alt={project.title}
 									className='w-full h-40 object-cover rounded-lg mb-4'
 								/>
+							) : (
+								<div className='w-full h-40 bg-gray-200 rounded-lg mb-4 flex items-center justify-center'>
+									<span className='text-gray-500'>Нет изображения</span>
+								</div>
 							)}
 
 							<h2 className='text-xl font-bold text-gray-800 mb-2'>
@@ -637,7 +724,7 @@ export function ProjectsFeed() {
 									<div>
 										<p className='text-xs text-gray-500'>Владелец проекта</p>
 										<p className='text-sm font-bold text-gray-800'>
-											{project.current_members?.[0] || 'Admin'}
+											{project.profiles?.full_name || 'Неизвестен'}
 										</p>
 									</div>
 									<div className='flex items-center space-x-1 text-gray-600'>
@@ -649,7 +736,9 @@ export function ProjectsFeed() {
 								</div>
 							</div>
 
-							<div className='flex gap-3'>{renderProjectButton(project)}</div>
+							<div className='flex gap-3' onClick={e => e.stopPropagation()}>
+								{renderProjectButton(project)}
+							</div>
 						</div>
 					))}
 				</div>
@@ -699,6 +788,23 @@ export function ProjectsFeed() {
 									rows={4}
 									className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none'
 								/>
+							</div>
+
+							<div>
+								<label className='block text-sm font-medium text-gray-700 mb-2'>
+									Ссылка на обложку
+								</label>
+								<input
+									type='url'
+									name='image_url'
+									value={createFormData.image_url}
+									onChange={handleCreateFormChange}
+									placeholder='https://example.com/image.jpg'
+									className='w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+								/>
+								<p className='text-xs text-gray-500 mt-1'>
+									Оставьте пустым для стандартной заглушки
+								</p>
 							</div>
 
 							<div>
@@ -865,6 +971,109 @@ export function ProjectsFeed() {
 								>
 									Закрыть
 								</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* View Project Modal */}
+			{isViewModalOpen && selectedProject && (
+				<div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50'>
+					<div className='bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto'>
+						<div className='flex items-center justify-between p-6 border-b sticky top-0 bg-white'>
+							<h2 className='text-2xl font-bold text-gray-800'>
+								{selectedProject.title}
+							</h2>
+							<button
+								onClick={() => setIsViewModalOpen(false)}
+								className='text-gray-500 hover:text-gray-700 transition'
+							>
+								<X className='w-6 h-6' />
+							</button>
+						</div>
+
+						<div className='p-6 space-y-6'>
+							{/* Project Image */}
+							{selectedProject.image_url ? (
+								<img
+									src={selectedProject.image_url}
+									alt={selectedProject.title}
+									className='w-full h-64 object-cover rounded-lg'
+								/>
+							) : (
+								<div className='w-full h-64 bg-gray-200 rounded-lg flex items-center justify-center'>
+									<span className='text-gray-500'>Нет изображения</span>
+								</div>
+							)}
+
+							{/* Project Description */}
+							<div>
+								<h3 className='text-lg font-bold text-gray-800 mb-2'>
+									Описание
+								</h3>
+								<p className='text-gray-600'>
+									{selectedProject.description || 'Описание не указано'}
+								</p>
+							</div>
+
+							{/* Project Owner */}
+							<div>
+								<h3 className='text-lg font-bold text-gray-800 mb-2'>
+									Создатель проекта
+								</h3>
+								<p className='text-gray-600'>
+									{selectedProject.profiles?.full_name || 'Неизвестен'}
+								</p>
+							</div>
+
+							{/* Required Roles */}
+							{selectedProject.required_roles &&
+								selectedProject.required_roles.length > 0 && (
+									<div>
+										<h3 className='text-lg font-bold text-gray-800 mb-2'>
+											Необходимые роли
+										</h3>
+										<div className='flex flex-wrap gap-2'>
+											{selectedProject.required_roles.map((role, idx) => (
+												<span
+													key={idx}
+													className='px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium'
+												>
+													{role}
+												</span>
+											))}
+										</div>
+									</div>
+								)}
+
+							{/* Current Members */}
+							<div>
+								<h3 className='text-lg font-bold text-gray-800 mb-2'>
+									Участники ({selectedProject.current_members?.length || 0})
+								</h3>
+								{selectedProject.current_members &&
+								selectedProject.current_members.length > 0 ? (
+									<div className='flex flex-wrap gap-2'>
+										{selectedProject.current_members.map((member, idx) => (
+											<span
+												key={idx}
+												className='px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium'
+											>
+												{member}
+											</span>
+										))}
+									</div>
+								) : (
+									<p className='text-gray-600'>Пока нет участников</p>
+								)}
+							</div>
+
+							{/* Action Button */}
+							<div className='border-t pt-6'>
+								<div className='flex gap-3'>
+									{renderProjectButton(selectedProject)}
+								</div>
 							</div>
 						</div>
 					</div>
