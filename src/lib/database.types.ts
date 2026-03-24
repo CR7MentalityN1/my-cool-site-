@@ -81,6 +81,7 @@ export interface Database {
 					image_url: string | null
 					owner_id: string
 					required_roles: string[]
+					current_members: string[]
 					created_at: string
 				}
 				Insert: {
@@ -90,6 +91,7 @@ export interface Database {
 					image_url?: string | null
 					owner_id: string
 					required_roles?: string[]
+					current_members?: string[]
 					created_at?: string
 				}
 				Update: {
@@ -99,6 +101,7 @@ export interface Database {
 					image_url?: string | null
 					owner_id?: string
 					required_roles?: string[]
+					current_members?: string[]
 					created_at?: string
 				}
 			}

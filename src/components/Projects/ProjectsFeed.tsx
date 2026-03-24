@@ -6,7 +6,6 @@ import type { Database } from '../../lib/database.types'
 
 type Project = Database['public']['Tables']['projects']['Row'] & {
 	owner?: { name?: string }
-	participants?: Array<{ id: string }>
 }
 
 interface CreateProjectForm {
@@ -114,12 +113,16 @@ export function ProjectsFeed() {
 				.map(role => role.trim())
 				.filter(role => role.length > 0)
 
+			const userFullName = user.user_metadata?.full_name || 'Участник'
+			const currentMembers = [userFullName]
+
 			const { error } = await (supabase as any).from('projects').insert([
 				{
 					title: formData.title,
 					description: formData.description || null,
 					owner_id: user.id,
 					required_roles: rolesArray,
+					current_members: currentMembers,
 					image_url: null,
 					created_at: new Date().toISOString(),
 				},
@@ -240,12 +243,14 @@ export function ProjectsFeed() {
 								<div className='flex items-center justify-between mb-3'>
 									<div>
 										<p className='text-xs text-gray-500'>Владелец проекта</p>
-										<p className='text-sm font-bold text-gray-800'>Admin</p>
+										<p className='text-sm font-bold text-gray-800'>
+											{project.current_members?.[0] || 'Admin'}
+										</p>
 									</div>
 									<div className='flex items-center space-x-1 text-gray-600'>
 										<Users className='w-4 h-4' />
 										<span className='text-sm font-bold'>
-											{project.participants?.length || 0} участников
+											{project.current_members?.length || 0} участников
 										</span>
 									</div>
 								</div>
