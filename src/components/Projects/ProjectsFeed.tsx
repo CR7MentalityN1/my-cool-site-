@@ -9,12 +9,16 @@ import {
 	Settings,
 	UserPlus,
 	Trash2,
+	CheckCircle,
+	Clock,
+	XCircle,
 } from 'lucide-react'
 import type { Database } from '../../lib/database.types'
 
 type Project = Database['public']['Tables']['projects']['Row']
 type ProjectApplication =
 	Database['public']['Tables']['project_applications']['Row']
+type Profile = Database['public']['Tables']['profiles']['Row']
 
 interface CreateProjectForm {
 	title: string
@@ -27,6 +31,13 @@ interface AdminEditForm {
 	roles: string
 }
 
+interface ApplicationWithProfile extends ProjectApplication {
+	applicantName?: string
+	applicantFaculty?: string
+}
+
+type UserProjectStatus = 'owner' | 'in_team' | 'has_application' | 'can_apply'
+
 export function ProjectsFeed() {
 	const { user } = useAuth()
 	const [projects, setProjects] = useState<Project[]>([])
@@ -36,10 +47,7 @@ export function ProjectsFeed() {
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 	const [isAdminModalOpen, setIsAdminModalOpen] = useState(false)
 	const [selectedProject, setSelectedProject] = useState<Project | null>(null)
-	const [applications, setApplications] = useState<ProjectApplication[]>([])
-	const [applicantNames, setApplicantNames] = useState<Record<string, string>>(
-		{},
-	)
+	const [applications, setApplications] = useState<ApplicationWithProfile[]>([])
 	const [adminEditForm, setAdminEditForm] = useState<AdminEditForm>({
 		description: '',
 		roles: '',
@@ -50,6 +58,9 @@ export function ProjectsFeed() {
 		roles: '',
 	})
 	const [isSubmitting, setIsSubmitting] = useState(false)
+	const [userProjectStatuses, setUserProjectStatuses] = useState<
+		Record<string, UserProjectStatus>
+	>({})
 
 	useEffect(() => {
 		fetchProjects()
@@ -58,6 +69,12 @@ export function ProjectsFeed() {
 	useEffect(() => {
 		applyFilters()
 	}, [projects, searchQuery])
+
+	useEffect(() => {
+		if (user && projects.length > 0) {
+			checkUserStatusForAllProjects()
+		}
+	}, [user, projects])
 
 	const fetchProjects = async () => {
 		setLoading(true)
@@ -72,6 +89,40 @@ export function ProjectsFeed() {
 			setProjects(data || [])
 		}
 		setLoading(false)
+	}
+
+	const checkUserStatusForAllProjects = async () => {
+		if (!user) return
+
+		const statuses: Record<string, UserProjectStatus> = {}
+		const userFullName = user.user_metadata?.full_name || ''
+
+		for (const project of projects) {
+			if (user.id === project.owner_id) {
+				statuses[project.id] = 'owner'
+			} else if (
+				project.current_members?.includes(userFullName)
+			) {
+				statuses[project.id] = 'in_team'
+			} else {
+				// Check if has application
+				const { data: appData } = await supabase
+					.from('project_applications')
+					.select('*')
+					.eq('project_id', project.id)
+					.eq('user_id', user.id)
+					.eq('status', 'pending')
+					.maybeSingle()
+
+				statuses[project.id] = appData ? 'has_application' : 'can_apply'
+			}
+		}
+
+		setUserProjectStatuses(statuses)
+	}
+
+	const getUserProjectStatus = (project: Project): UserProjectStatus => {
+		return userProjectStatuses[project.id] || 'can_apply'
 	}
 
 	const applyFilters = () => {
@@ -89,8 +140,33 @@ export function ProjectsFeed() {
 		setFilteredProjects(filtered)
 	}
 
-	const handleApply = (async (projectId: string) => {
+	const handleApply = async (projectId: string) => {
 		if (!user) return
+
+		const project = projects.find(p => p.id === projectId)
+		if (!project) return
+
+		const userFullName = user.user_metadata?.full_name || ''
+
+		// Check if already in team
+		if (project.current_members?.includes(userFullName)) {
+			alert('Вы уже в этой команде')
+			return
+		}
+
+		// Check if already has application
+		const { data: existingApp } = await supabase
+			.from('project_applications')
+			.select('*')
+			.eq('project_id', projectId)
+			.eq('user_id', user.id)
+			.eq('status', 'pending')
+			.maybeSingle()
+
+		if (existingApp) {
+			alert('Вы уже подали заявку на этот проект')
+			return
+		}
 
 		try {
 			const { error } = await (supabase as any)
@@ -109,11 +185,12 @@ export function ProjectsFeed() {
 				alert('Ошибка при подаче заявки')
 			} else {
 				alert('Заявка успешно подана!')
+				checkUserStatusForAllProjects()
 			}
 		} catch (error) {
 			console.error('Error:', error)
 		}
-	}) as any
+	}
 
 	const handleCreateProject = async (e: React.FormEvent) => {
 		e.preventDefault()
@@ -186,25 +263,31 @@ export function ProjectsFeed() {
 				console.error('Error fetching applications:', error)
 			} else {
 				const apps = (data || []) as any
-				setApplications(apps)
-
-				// Fetch applicant names
-				const names: Record<string, string> = {}
+				
+				// Fetch profile data for applicants
+				const appsWithProfiles: ApplicationWithProfile[] = []
 				for (const app of apps) {
 					try {
-						const { data: userData } = await supabase.auth.admin.getUserById(
-							app.user_id,
-						)
-						if (userData?.user?.user_metadata?.full_name) {
-							names[app.user_id] = userData.user.user_metadata.full_name
-						} else {
-							names[app.user_id] = 'Участник'
-						}
+						const { data: profileData } = await supabase
+							.from('profiles')
+							.select('name, faculty')
+							.eq('auth_id', app.user_id)
+							.maybeSingle()
+
+						appsWithProfiles.push({
+							...app,
+							applicantName: profileData?.name || 'Участник',
+							applicantFaculty: profileData?.faculty || 'Не указано',
+						})
 					} catch {
-						names[app.user_id] = 'Участник'
+						appsWithProfiles.push({
+							...app,
+							applicantName: 'Участник',
+							applicantFaculty: 'Не указано',
+						})
 					}
 				}
-				setApplicantNames(names)
+				setApplications(appsWithProfiles)
 			}
 		} catch (error) {
 			console.error('Error:', error)
@@ -213,15 +296,20 @@ export function ProjectsFeed() {
 		setIsAdminModalOpen(true)
 	}
 
-	const handleAcceptApplication = async (application: ProjectApplication) => {
+	const handleAcceptApplication = async (application: ApplicationWithProfile) => {
 		if (!selectedProject || !user) return
 
 		try {
-			const applicantName = applicantNames[application.user_id] || 'Участник'
-			const updatedMembers = [
-				...(selectedProject.current_members || []),
-				applicantName,
-			]
+			const applicantName = application.applicantName || 'Участник'
+			
+			// Check for duplicates before adding
+			const currentMembers = selectedProject.current_members || []
+			if (currentMembers.includes(applicantName)) {
+				alert('Этот пользователь уже в команде')
+				return
+			}
+
+			const updatedMembers = [...currentMembers, applicantName]
 
 			// Update project with new member
 			const { error: updateError } = await (supabase as any)
@@ -231,28 +319,49 @@ export function ProjectsFeed() {
 
 			if (updateError) throw updateError
 
-			// Delete application
-			const { error: deleteError } = await supabase
+			// Update application status to accepted
+			const { error: statusError } = await supabase
 				.from('project_applications')
-				.delete()
+				.update({ status: 'accepted' })
 				.eq('id', application.id)
 
-			if (deleteError) throw deleteError
+			if (statusError) throw statusError
 
 			alert('Заявка принята!')
 			setApplications(applications.filter(app => app.id !== application.id))
-
+			
 			// Update selected project
 			setSelectedProject({
 				...selectedProject,
 				current_members: updatedMembers,
 			})
-
-			// Refresh projects
+			
+			// Refresh projects and statuses
 			fetchProjects()
+			checkUserStatusForAllProjects()
 		} catch (error) {
 			console.error('Error accepting application:', error)
 			alert('Ошибка при принятии заявки')
+		}
+	}
+
+	const handleRejectApplication = async (application: ApplicationWithProfile) => {
+		if (!selectedProject) return
+
+		try {
+			// Update application status to rejected
+			const { error } = await supabase
+				.from('project_applications')
+				.update({ status: 'rejected' })
+				.eq('id', application.id)
+
+			if (error) throw error
+
+			alert('Заявка отклонена!')
+			setApplications(applications.filter(app => app.id !== application.id))
+		} catch (error) {
+			console.error('Error rejecting application:', error)
+			alert('Ошибка при отклонении заявки')
 		}
 	}
 
@@ -324,11 +433,72 @@ export function ProjectsFeed() {
 	const handleCreateFormChange = (
 		e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
 	) => {
-		const { name, value } = e.target
 		setCreateFormData(prev => ({
 			...prev,
-			[name]: value,
+			[e.target.name]: e.target.value,
 		}))
+	}
+
+	const renderProjectButton = (project: Project) => {
+		if (!user) {
+			return (
+				<button
+					onClick={() => handleApply(project.id)}
+					className='flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2'
+				>
+					<UserPlus className='w-4 h-4' />
+					Подать заявку
+				</button>
+			)
+		}
+
+		const status = getUserProjectStatus(project)
+
+		if (status === 'owner') {
+			return (
+				<button
+					onClick={() => openAdminModal(project)}
+					className='flex-1 bg-gray-600 text-white py-2 rounded-lg font-bold hover:bg-gray-700 transition flex items-center justify-center gap-2'
+				>
+					<Settings className='w-4 h-4' />
+					Управление
+				</button>
+			)
+		}
+
+		if (status === 'in_team') {
+			return (
+				<button
+					disabled
+					className='flex-1 bg-green-600 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-2 opacity-75 cursor-not-allowed'
+				>
+					<CheckCircle className='w-4 h-4' />
+					Вы в команде
+				</button>
+			)
+		}
+
+		if (status === 'has_application') {
+			return (
+				<button
+					disabled
+					className='flex-1 bg-yellow-600 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-2 opacity-75 cursor-not-allowed'
+				>
+					<Clock className='w-4 h-4' />
+					Заявка на рассмотрении
+				</button>
+			)
+		}
+
+		return (
+			<button
+				onClick={() => handleApply(project.id)}
+				className='flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2'
+			>
+				<UserPlus className='w-4 h-4' />
+				Подать заявку
+			</button>
+		)
 	}
 
 	if (loading) {
@@ -360,13 +530,15 @@ export function ProjectsFeed() {
 							/>
 						</div>
 					</div>
-					<button
-						onClick={() => setIsCreateModalOpen(true)}
-						className='bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center gap-2'
-					>
-						<Plus className='w-5 h-5' />
-						Создать проект
-					</button>
+					{user && (
+						<button
+							onClick={() => setIsCreateModalOpen(true)}
+							className='bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center gap-2'
+						>
+							<Plus className='w-5 h-5' />
+							Создать проект
+						</button>
+					)}
 				</div>
 			</div>
 
@@ -433,23 +605,7 @@ export function ProjectsFeed() {
 							</div>
 
 							<div className='flex gap-3'>
-								{user && user.id === project.owner_id ? (
-									<button
-										onClick={() => openAdminModal(project)}
-										className='flex-1 bg-gray-600 text-white py-2 rounded-lg font-bold hover:bg-gray-700 transition flex items-center justify-center gap-2'
-									>
-										<Settings className='w-4 h-4' />
-										Управление
-									</button>
-								) : (
-									<button
-										onClick={() => handleApply(project.id)}
-										className='flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2'
-									>
-										<UserPlus className='w-4 h-4' />
-										Подать заявку
-									</button>
-								)}
+								{renderProjectButton(project)}
 							</div>
 						</div>
 					))}
@@ -617,18 +773,31 @@ export function ProjectsFeed() {
 											>
 												<div>
 													<p className='font-medium text-gray-800'>
-														{applicantNames[app.user_id] || 'Участник'}
+														{app.applicantName}
 													</p>
-													<p className='text-xs text-gray-500'>
+													<p className='text-sm text-gray-600'>
+														{app.applicantFaculty}
+													</p>
+													<p className='text-xs text-gray-500 mt-1'>
 														Статус: {app.status}
 													</p>
 												</div>
-												<button
-													onClick={() => handleAcceptApplication(app)}
-													className='bg-green-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-green-700 transition'
-												>
-													Принять
-												</button>
+												<div className='flex gap-2'>
+													<button
+														onClick={() => handleAcceptApplication(app)}
+														className='bg-green-600 text-white px-3 py-1 rounded-lg text-sm font-bold hover:bg-green-700 transition flex items-center gap-1'
+													>
+														<CheckCircle className='w-4 h-4' />
+														Принять
+													</button>
+													<button
+														onClick={() => handleRejectApplication(app)}
+														className='bg-red-600 text-white px-3 py-1 rounded-lg text-sm font-bold hover:bg-red-700 transition flex items-center gap-1'
+													>
+														<XCircle className='w-4 h-4' />
+														Отклонить
+													</button>
+												</div>
 											</div>
 										))}
 									</div>
