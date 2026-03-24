@@ -18,6 +18,12 @@ import type { Database } from '../../lib/database.types'
 type Project = Database['public']['Tables']['projects']['Row']
 type ProjectApplication =
 	Database['public']['Tables']['project_applications']['Row']
+type ProjectInsert = Database['public']['Tables']['projects']['Insert']
+type ProjectUpdate = Database['public']['Tables']['projects']['Update']
+type ProjectApplicationInsert =
+	Database['public']['Tables']['project_applications']['Insert']
+type ProjectApplicationUpdate =
+	Database['public']['Tables']['project_applications']['Update']
 type ProfileRow = Database['public']['Tables']['profiles']['Row']
 
 interface CreateProjectForm {
@@ -167,16 +173,16 @@ export function ProjectsFeed() {
 		}
 
 		try {
+			const insertData: ProjectApplicationInsert = {
+				project_id: projectId,
+				user_id: user.id,
+				status: 'pending' as const,
+				created_at: new Date().toISOString(),
+			}
+
 			const { error } = await supabase
 				.from('project_applications')
-				.insert([
-					{
-						project_id: projectId,
-						user_id: user.id,
-						status: 'pending' as const,
-						created_at: new Date().toISOString(),
-					},
-				])
+				.insert([insertData])
 
 			if (error) {
 				console.error('Error applying to project:', error)
@@ -214,17 +220,17 @@ export function ProjectsFeed() {
 			const userFullName = user.user_metadata?.full_name || 'Участник'
 			const currentMembers = [userFullName]
 
-			const { error } = await supabase.from('projects').insert([
-				{
-					title: createFormData.title,
-					description: createFormData.description || null,
-					owner_id: user.id,
-					required_roles: rolesArray,
-					current_members: currentMembers,
-					image_url: null,
-					created_at: new Date().toISOString(),
-				},
-			])
+			const insertData: ProjectInsert = {
+				title: createFormData.title,
+				description: createFormData.description || null,
+				owner_id: user.id,
+				required_roles: rolesArray,
+				current_members: currentMembers,
+				image_url: null,
+				created_at: new Date().toISOString(),
+			}
+
+			const { error } = await supabase.from('projects').insert([insertData])
 
 			if (error) {
 				console.error('Error creating project:', error)
@@ -314,17 +320,19 @@ export function ProjectsFeed() {
 			const updatedMembers = [...currentMembers, applicantName]
 
 			// Update project with new member
+			const projectUpdateData: ProjectUpdate = { current_members: updatedMembers }
 			const { error: updateError } = await supabase
 				.from('projects')
-				.update({ current_members: updatedMembers })
+				.update(projectUpdateData)
 				.eq('id', selectedProject.id)
 
 			if (updateError) throw updateError
 
 			// Update application status to accepted
+			const applicationUpdateData: ProjectApplicationUpdate = { status: 'accepted' as const }
 			const { error: statusError } = await supabase
 				.from('project_applications')
-				.update({ status: 'accepted' as const })
+				.update(applicationUpdateData)
 				.eq('id', application.id)
 
 			if (statusError) throw statusError
@@ -354,9 +362,10 @@ export function ProjectsFeed() {
 
 		try {
 			// Update application status to rejected
+			const applicationUpdateData: ProjectApplicationUpdate = { status: 'rejected' as const }
 			const { error } = await supabase
 				.from('project_applications')
-				.update({ status: 'rejected' as const })
+				.update(applicationUpdateData)
 				.eq('id', application.id)
 
 			if (error) throw error
@@ -401,12 +410,14 @@ export function ProjectsFeed() {
 				.map(role => role.trim())
 				.filter(role => role.length > 0)
 
+			const projectUpdateData: ProjectUpdate = {
+				description: adminEditForm.description || null,
+				required_roles: rolesArray,
+			}
+
 			const { error } = await supabase
 				.from('projects')
-				.update({
-					description: adminEditForm.description || null,
-					required_roles: rolesArray,
-				})
+				.update(projectUpdateData)
 				.eq('id', selectedProject.id)
 
 			if (error) throw error
