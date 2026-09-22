@@ -3,6 +3,7 @@ import { useAuth } from './contexts/AuthContext'
 import { supabase } from './lib/supabase'
 import { Landing } from './components/Layout/Landing'
 import { Header } from './components/Layout/Header'
+import type { AppPage } from './components/Layout/Header'
 import { LoginForm } from './components/Auth/LoginForm'
 import { RegisterForm } from './components/Auth/RegisterForm'
 import { ForgotPasswordForm } from './components/Auth/ForgotPasswordForm'
@@ -18,9 +19,7 @@ function App() {
 	const [authMode, setAuthMode] = useState<
 		'login' | 'register' | 'forgot' | 'reset'
 	>('login')
-	const [currentPage, setCurrentPage] = useState<
-		'landing' | 'feed' | 'profile' | 'chat' | 'projects'
-	>('landing')
+	const [currentPage, setCurrentPage] = useState<AppPage>('landing')
 
 	useEffect(() => {
 		// keep legacy behavior for in-app reset form
@@ -102,10 +101,7 @@ function App() {
 
 	return (
 		<div className='min-h-screen bg-[var(--bg)]'>
-			<Header
-				currentPage={currentPage}
-				onNavigate={(page: any) => setCurrentPage(page)}
-			/>
+			<Header currentPage={currentPage} onNavigate={setCurrentPage} />
 			<main>
 				{currentPage === 'feed' && <StudentsFeed />}
 				{currentPage === 'projects' && <ProjectsFeed />}

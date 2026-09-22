@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import {
@@ -201,7 +201,6 @@ type UserProjectStatus = 'owner' | 'in_team' | 'has_application' | 'can_apply'
 export function ProjectsFeed() {
 	const { user } = useAuth()
 	const [projects, setProjects] = useState<Project[]>([])
-	const [filteredProjects, setFilteredProjects] = useState<Project[]>([])
 	const [loading, setLoading] = useState(true)
 	const [searchQuery, setSearchQuery] = useState('')
 	const [filterMode, setFilterMode] = useState<'all' | 'my'>('all')
@@ -255,19 +254,6 @@ export function ProjectsFeed() {
 		}
 	}, [user])
 
-	useEffect(() => {
-		applyFilters()
-	}, [projects, searchQuery, filterMode, user, currentUserName])
-
-	useEffect(() => {
-		if (user && projects.length > 0) {
-			checkUserStatusForAllProjects()
-			projects.forEach(project => {
-				fetchRoleApplicationCounts(project.id)
-			})
-		}
-	}, [user, projects])
-
 	const fetchProjects = async () => {
 		setLoading(true)
 		const { data, error } = await supabase
@@ -315,7 +301,7 @@ export function ProjectsFeed() {
 		setLoading(false)
 	}
 
-	const fetchRoleApplicationCounts = async (projectId: string) => {
+	const fetchRoleApplicationCounts = useCallback(async (projectId: string) => {
 		try {
 			const { data, error } = await supabase
 				.from('project_applications')
@@ -350,9 +336,9 @@ export function ProjectsFeed() {
 			console.error('Error:', error)
 			return {}
 		}
-	}
+	}, [])
 
-	const checkUserStatusForAllProjects = async () => {
+	const checkUserStatusForAllProjects = useCallback(async () => {
 		if (!user) return
 
 		const statuses: Record<string, UserProjectStatus> = {}
@@ -377,13 +363,22 @@ export function ProjectsFeed() {
 		}
 
 		setUserProjectStatuses(statuses)
-	}
+	}, [user, projects, currentUserName])
+
+	useEffect(() => {
+		if (user && projects.length > 0) {
+			checkUserStatusForAllProjects()
+			projects.forEach(project => {
+				fetchRoleApplicationCounts(project.id)
+			})
+		}
+	}, [user, projects, checkUserStatusForAllProjects, fetchRoleApplicationCounts])
 
 	const getUserProjectStatus = (project: Project): UserProjectStatus => {
 		return userProjectStatuses[project.id] || 'can_apply'
 	}
 
-	const applyFilters = () => {
+	const filteredProjects = useMemo(() => {
 		let filtered = projects
 
 		if (filterMode === 'my' && user) {
@@ -403,8 +398,8 @@ export function ProjectsFeed() {
 			)
 		}
 
-		setFilteredProjects(filtered)
-	}
+		return filtered
+	}, [projects, searchQuery, filterMode, user, currentUserName])
 
 	const handleApply = async (projectId: string, roleAppliedFor?: string) => {
 		if (!user) {
@@ -450,7 +445,7 @@ export function ProjectsFeed() {
 				role_applied_for: roleAppliedFor?.trim() ? roleAppliedFor.trim() : null,
 			}
 
-			const { error } = await (supabase as any)
+			const { error } = await supabase
 				.from('project_applications')
 				.insert([insertDataWithRole])
 
@@ -540,7 +535,7 @@ export function ProjectsFeed() {
 				created_at: new Date().toISOString(),
 			}
 
-			const { error } = await (supabase as any)
+			const { error } = await supabase
 				.from('projects')
 				.insert([insertData])
 
@@ -693,7 +688,7 @@ export function ProjectsFeed() {
 				current_members: updatedMembers,
 				required_roles: updatedRequiredRoles,
 			}
-			const { error: updateError } = await (supabase as any)
+			const { error: updateError } = await supabase
 				.from('projects')
 				.update(projectUpdateData)
 				.eq('id', selectedProject.id)
@@ -705,7 +700,7 @@ export function ProjectsFeed() {
 			const applicationUpdateData: ProjectApplicationUpdateData = {
 				status: 'accepted',
 			}
-			const { error: statusError } = await (supabase as any)
+			const { error: statusError } = await supabase
 				.from('project_applications')
 				.update(applicationUpdateData)
 				.eq('id', application.id)
@@ -746,7 +741,7 @@ export function ProjectsFeed() {
 			const applicationUpdateData: ProjectApplicationUpdateData = {
 				status: 'rejected',
 			}
-			const { error } = await (supabase as any)
+			const { error } = await supabase
 				.from('project_applications')
 				.update(applicationUpdateData)
 				.eq('id', application.id)
@@ -804,7 +799,7 @@ export function ProjectsFeed() {
 				image_url: adminEditForm.image_url || null,
 			}
 
-			const { error } = await (supabase as any)
+			const { error } = await supabase
 				.from('projects')
 				.update(projectUpdateData)
 				.eq('id', selectedProject.id)
@@ -877,50 +872,6 @@ export function ProjectsFeed() {
 
 	const updateRoleCount = (index: number, value: number) => {
 		setCreateFormData(prev => ({
-			...prev,
-			roles: prev.roles.map((role, i) =>
-				i === index ? { ...role, count: Math.max(1, value) } : role,
-			),
-		}))
-	}
-
-	// Admin modal role management
-	const addAdminRole = () => {
-		setAdminEditForm(prev => ({
-			...prev,
-			roles: [
-				...prev.roles,
-				{ faculty: '', specialization: '', filled: 0, count: 1 },
-			],
-		}))
-	}
-
-	const removeAdminRole = (index: number) => {
-		setAdminEditForm(prev => ({
-			...prev,
-			roles: prev.roles.filter((_, i) => i !== index),
-		}))
-	}
-
-	const updateAdminRole = (
-		index: number,
-		field: 'faculty' | 'specialization',
-		value: string,
-	) => {
-		setAdminEditForm(prev => ({
-			...prev,
-			roles: prev.roles.map((role, i) =>
-				i === index
-					? field === 'faculty'
-						? { ...role, faculty: value, specialization: '' }
-						: { ...role, specialization: value }
-					: role,
-			),
-		}))
-	}
-
-	const updateAdminRoleCount = (index: number, value: number) => {
-		setAdminEditForm(prev => ({
 			...prev,
 			roles: prev.roles.map((role, i) =>
 				i === index ? { ...role, count: Math.max(1, value) } : role,

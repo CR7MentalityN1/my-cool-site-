@@ -10,9 +10,11 @@ import {
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
 
+export type AppPage = 'landing' | 'feed' | 'profile' | 'chat' | 'projects'
+
 interface HeaderProps {
-	currentPage: string
-	onNavigate: (page: string) => void
+	currentPage: AppPage
+	onNavigate: (page: AppPage) => void
 }
 
 export function Header({ currentPage, onNavigate }: HeaderProps) {

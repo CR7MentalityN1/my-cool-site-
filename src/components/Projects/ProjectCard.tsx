@@ -25,7 +25,6 @@ interface ProjectCardProps {
 export function ProjectCard({
 	project,
 	status,
-	applicationsByRoleKey,
 	onOpen,
 	onOpenAdmin,
 	onApply,

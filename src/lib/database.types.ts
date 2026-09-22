@@ -55,6 +55,7 @@ export interface Database {
 					created_at?: string
 					updated_at?: string
 				}
+				Relationships: []
 			}
 			messages: {
 				Row: {
@@ -75,6 +76,15 @@ export interface Database {
 					content?: string
 					created_at?: string
 				}
+				Relationships: [
+					{
+						foreignKeyName: 'messages_user_id_fkey'
+						columns: ['user_id']
+						isOneToOne: false
+						referencedRelation: 'profiles'
+						referencedColumns: ['id']
+					},
+				]
 			}
 			projects: {
 				Row: {
@@ -107,6 +117,7 @@ export interface Database {
 					current_members?: string[]
 					created_at?: string
 				}
+				Relationships: []
 			}
 			project_applications: {
 				Row: {
@@ -133,7 +144,18 @@ export interface Database {
 					role_applied_for?: string | null
 					created_at?: string
 				}
+				Relationships: [
+					{
+						foreignKeyName: 'project_applications_project_id_fkey'
+						columns: ['project_id']
+						isOneToOne: false
+						referencedRelation: 'projects'
+						referencedColumns: ['id']
+					},
+				]
 			}
 		}
+		Views: { [_ in never]: never }
+		Functions: { [_ in never]: never }
 	}
 }

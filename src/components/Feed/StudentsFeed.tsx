@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { StudentCard } from './StudentCard'
 import { StudentModal } from './StudentModal'
@@ -21,7 +21,6 @@ const FACULTIES = [
 
 export function StudentsFeed() {
 	const [profiles, setProfiles] = useState<Profile[]>([])
-	const [filteredProfiles, setFilteredProfiles] = useState<Profile[]>([])
 	const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null)
 	const [loading, setLoading] = useState(true)
 	const [facultyFilter, setFacultyFilter] = useState('Все')
@@ -31,16 +30,16 @@ export function StudentsFeed() {
 
 	// Get unique specializations from profiles
 	const allSpecializations = [
-		...new Set(profiles.map(p => p.specialization).filter(Boolean)),
+		...new Set(
+			profiles
+				.map(p => p.specialization)
+				.filter((value): value is string => Boolean(value)),
+		),
 	].sort()
 
 	useEffect(() => {
 		fetchProfiles()
 	}, [])
-
-	useEffect(() => {
-		applyFilters()
-	}, [profiles, facultyFilter, specializationFilter, courseFilter, searchQuery])
 
 	const fetchProfiles = async () => {
 		setLoading(true)
@@ -60,7 +59,7 @@ export function StudentsFeed() {
 		}
 	}
 
-	const applyFilters = () => {
+	const filteredProfiles = useMemo(() => {
 		let filtered = profiles
 
 		if (facultyFilter !== 'Все') {
@@ -87,8 +86,8 @@ export function StudentsFeed() {
 			)
 		}
 
-		setFilteredProfiles(filtered)
-	}
+		return filtered
+	}, [profiles, facultyFilter, specializationFilter, courseFilter, searchQuery])
 
 	if (loading) {
 		return (

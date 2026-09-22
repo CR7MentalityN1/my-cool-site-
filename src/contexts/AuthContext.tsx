@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		// Если регистрация успешна, но требуется подтверждение
 		if (data.user) {
 			try {
-				const { error: profileError } = await (supabase as any)
+				const { error: profileError } = await supabase
 					.from('profiles')
 					.upsert({
 						id: data.user.id,
@@ -135,7 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const resetPasswordForEmail = async (email: string) => {
 		try {
 			const { error } = await supabase.auth.resetPasswordForEmail(email, {
-				redirectTo: 'https://my-cool-site-puce.vercel.app/reset-password',
+				redirectTo: `${window.location.origin}/reset-password`,
 			})
 			if (error) throw error
 		} catch (e) {
