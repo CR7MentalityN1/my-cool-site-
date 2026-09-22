@@ -95,6 +95,9 @@ export interface Database {
 					owner_id: string
 					required_roles: string[]
 					current_members: string[]
+					status: 'recruiting' | 'team_formed' | 'completed'
+					result_url: string | null
+					completed_at: string | null
 					created_at: string
 				}
 				Insert: {
@@ -105,6 +108,9 @@ export interface Database {
 					owner_id: string
 					required_roles?: string[]
 					current_members?: string[]
+					status?: 'recruiting' | 'team_formed' | 'completed'
+					result_url?: string | null
+					completed_at?: string | null
 					created_at?: string
 				}
 				Update: {
@@ -115,6 +121,9 @@ export interface Database {
 					owner_id?: string
 					required_roles?: string[]
 					current_members?: string[]
+					status?: 'recruiting' | 'team_formed' | 'completed'
+					result_url?: string | null
+					completed_at?: string | null
 					created_at?: string
 				}
 				Relationships: []
@@ -147,6 +156,38 @@ export interface Database {
 				Relationships: [
 					{
 						foreignKeyName: 'project_applications_project_id_fkey'
+						columns: ['project_id']
+						isOneToOne: false
+						referencedRelation: 'projects'
+						referencedColumns: ['id']
+					},
+				]
+			}
+			project_members: {
+				Row: {
+					id: string
+					project_id: string
+					user_id: string
+					role: string | null
+					joined_at: string
+				}
+				Insert: {
+					id?: string
+					project_id: string
+					user_id: string
+					role?: string | null
+					joined_at?: string
+				}
+				Update: {
+					id?: string
+					project_id?: string
+					user_id?: string
+					role?: string | null
+					joined_at?: string
+				}
+				Relationships: [
+					{
+						foreignKeyName: 'project_members_project_id_fkey'
 						columns: ['project_id']
 						isOneToOne: false
 						referencedRelation: 'projects'

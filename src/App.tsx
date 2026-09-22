@@ -28,6 +28,12 @@ function App() {
 	}, [])
 
 	useEffect(() => {
+		if (user && currentPage === 'landing') {
+			setCurrentPage('projects')
+		}
+	}, [user, currentPage])
+
+	useEffect(() => {
 		const {
 			data: { subscription },
 		} = supabase.auth.onAuthStateChange(event => {

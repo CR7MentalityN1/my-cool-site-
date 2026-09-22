@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { User, Contact, FileText, Sparkles } from 'lucide-react'
+import { CompletedProjects } from './CompletedProjects'
 
 const FACULTIES = [
 	'Прикладная математика',
@@ -365,6 +366,10 @@ export function ProfileForm() {
 					{loading ? 'Сохранение...' : 'Сохранить профиль'}
 				</button>
 			</form>
+
+			<div className='mt-8 border-t border-[var(--border)] pt-6'>
+				<CompletedProjects userId={user.id} />
+			</div>
 		</div>
 	)
 }

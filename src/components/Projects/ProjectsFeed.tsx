@@ -12,8 +12,16 @@ import {
 	CheckCircle,
 	Clock,
 	XCircle,
+	Sparkles,
+	Trophy,
+	ExternalLink,
 } from 'lucide-react'
 import type { Database } from '../../lib/database.types'
+import {
+	getProjectRecommendation,
+	type Recommendation,
+} from '../../lib/recommendations'
+import { safeExternalUrl } from '../../lib/urls'
 
 const FACULTIES = [
 	'Прикладная математика',
@@ -168,6 +176,9 @@ interface ProjectUpdateData {
 	description?: string | null
 	required_roles?: string[]
 	image_url?: string | null
+	status?: 'recruiting' | 'team_formed' | 'completed'
+	result_url?: string | null
+	completed_at?: string | null
 }
 
 interface ProjectApplicationUpdateData {
@@ -185,6 +196,8 @@ interface AdminEditForm {
 	description: string
 	image_url: string
 	roles: StoredProjectRole[]
+	status: 'recruiting' | 'team_formed' | 'completed'
+	result_url: string
 }
 
 interface ApplicationWithProfile extends ProjectApplication {
@@ -196,14 +209,29 @@ interface RoleApplicationCount {
 	[roleName: string]: number
 }
 
+interface RecommendedParticipant {
+	profile: ProfileRow
+	recommendation: Recommendation
+}
+
 type UserProjectStatus = 'owner' | 'in_team' | 'has_application' | 'can_apply'
 
+const PROJECT_STATUS_LABELS = {
+	recruiting: 'Идёт набор',
+	team_formed: 'Команда сформирована',
+	completed: 'Проект завершён',
+} as const
+
+const getProjectStatus = (project: Project) => project.status || 'recruiting'
+
 export function ProjectsFeed() {
-	const { user } = useAuth()
+	const { user, profile } = useAuth()
 	const [projects, setProjects] = useState<Project[]>([])
 	const [loading, setLoading] = useState(true)
 	const [searchQuery, setSearchQuery] = useState('')
-	const [filterMode, setFilterMode] = useState<'all' | 'my'>('all')
+	const [filterMode, setFilterMode] = useState<'all' | 'recommended' | 'my'>(
+		'all',
+	)
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
 	const [isAdminModalOpen, setIsAdminModalOpen] = useState(false)
 	const [selectedProject, setSelectedProject] = useState<Project | null>(null)
@@ -213,6 +241,8 @@ export function ProjectsFeed() {
 		description: '',
 		image_url: '',
 		roles: [],
+		status: 'recruiting',
+		result_url: '',
 	})
 	const [createFormData, setCreateFormData] = useState<CreateProjectForm>({
 		title: '',
@@ -228,6 +258,25 @@ export function ProjectsFeed() {
 	const [roleApplicationCounts, setRoleApplicationCounts] = useState<
 		Record<string, RoleApplicationCount>
 	>({})
+	const [recommendedParticipants, setRecommendedParticipants] = useState<
+		RecommendedParticipant[]
+	>([])
+	const [recommendationsLoading, setRecommendationsLoading] = useState(false)
+
+	const projectRecommendations = useMemo(() => {
+		const recommendations = new Map<string, Recommendation>()
+		if (!profile) return recommendations
+
+		projects.forEach(project => {
+			if (project.owner_id !== user?.id && project.status !== 'completed') {
+				recommendations.set(
+					project.id,
+					getProjectRecommendation(profile, project),
+				)
+			}
+		})
+		return recommendations
+	}, [profile, projects, user?.id])
 
 	useEffect(() => {
 		fetchProjects()
@@ -389,6 +438,19 @@ export function ProjectsFeed() {
 			)
 		}
 
+		if (filterMode === 'recommended' && profile) {
+			filtered = filtered
+				.filter(project => {
+					const recommendation = projectRecommendations.get(project.id)
+					return Boolean(recommendation && recommendation.score > 0)
+				})
+				.sort(
+					(a, b) =>
+						(projectRecommendations.get(b.id)?.score || 0) -
+						(projectRecommendations.get(a.id)?.score || 0),
+				)
+		}
+
 		if (searchQuery) {
 			const query = searchQuery.toLowerCase()
 			filtered = filtered.filter(
@@ -399,7 +461,15 @@ export function ProjectsFeed() {
 		}
 
 		return filtered
-	}, [projects, searchQuery, filterMode, user, currentUserName])
+	}, [
+		projects,
+		searchQuery,
+		filterMode,
+		user,
+		profile,
+		currentUserName,
+		projectRecommendations,
+	])
 
 	const handleApply = async (projectId: string, roleAppliedFor?: string) => {
 		if (!user) {
@@ -409,6 +479,10 @@ export function ProjectsFeed() {
 
 		const project = projects.find(p => p.id === projectId)
 		if (!project) return
+		if (project.status && project.status !== 'recruiting') {
+			alert('Набор в этот проект уже закрыт')
+			return
+		}
 
 		const userFullName = user.user_metadata?.full_name || ''
 
@@ -581,14 +655,22 @@ export function ProjectsFeed() {
 			description: project.description || '',
 			image_url: project.image_url || '',
 			roles: parsedRoles,
+			status: project.status || 'recruiting',
+			result_url: project.result_url || '',
 		})
+		setRecommendedParticipants([])
+		setRecommendationsLoading(true)
 
 		try {
-			const { data, error } = await supabase
-				.from('project_applications')
-				.select('*')
-				.eq('project_id', project.id)
-				.eq('status', 'pending')
+			const [{ data, error }, { data: profilesData, error: profilesError }] =
+				await Promise.all([
+					supabase
+						.from('project_applications')
+						.select('*')
+						.eq('project_id', project.id)
+						.eq('status', 'pending'),
+					supabase.from('profiles').select('*'),
+				])
 
 			if (error) {
 				console.error('Error fetching applications:', error)
@@ -622,8 +704,30 @@ export function ProjectsFeed() {
 				}
 				setApplications(appsWithProfiles)
 			}
+
+			if (profilesError) {
+				console.error('Error fetching recommended participants:', profilesError)
+			} else {
+				const currentMemberNames = new Set(project.current_members || [])
+				const recommended = (profilesData || [])
+					.filter(
+						candidate =>
+							candidate.auth_id !== project.owner_id &&
+							!currentMemberNames.has(candidate.name || ''),
+					)
+					.map(candidate => ({
+						profile: candidate,
+						recommendation: getProjectRecommendation(candidate, project),
+					}))
+					.filter(item => item.recommendation.score > 0)
+					.sort((a, b) => b.recommendation.score - a.recommendation.score)
+					.slice(0, 6)
+				setRecommendedParticipants(recommended)
+			}
 		} catch (error) {
 			console.error('Error:', error)
+		} finally {
+			setRecommendationsLoading(false)
 		}
 
 		setIsAdminModalOpen(true)
@@ -707,8 +811,27 @@ export function ProjectsFeed() {
 
 			if (statusError) throw statusError
 
+			// Store membership by user id for reliable portfolio records.
+			// The existing name list is kept for backward compatibility.
+			const { error: memberError } = await supabase
+				.from('project_members')
+				.upsert(
+					{
+						project_id: selectedProject.id,
+						user_id: application.user_id,
+						role: application.role_applied_for,
+					},
+					{ onConflict: 'project_id,user_id' },
+				)
+			if (memberError) {
+				console.error('Error saving project member:', memberError)
+			}
+
 			alert('Заявка принята!')
 			setApplications(applications.filter(app => app.id !== application.id))
+			setRecommendedParticipants(current =>
+				current.filter(item => item.profile.auth_id !== application.user_id),
+			)
 
 			// Update selected project
 			setSelectedProject({
@@ -797,6 +920,12 @@ export function ProjectsFeed() {
 			const projectUpdateData: ProjectUpdateData = {
 				description: adminEditForm.description || null,
 				image_url: adminEditForm.image_url || null,
+				status: adminEditForm.status,
+				result_url: adminEditForm.result_url.trim() || null,
+				completed_at:
+					adminEditForm.status === 'completed'
+						? selectedProject.completed_at || new Date().toISOString()
+						: null,
 			}
 
 			const { error } = await supabase
@@ -810,8 +939,14 @@ export function ProjectsFeed() {
 			alert('Проект обновлен!')
 			setSelectedProject({
 				...selectedProject,
-				description: adminEditForm.description,
-				image_url: adminEditForm.image_url,
+				description: adminEditForm.description || null,
+				image_url: adminEditForm.image_url || null,
+				status: adminEditForm.status,
+				result_url: adminEditForm.result_url.trim() || null,
+				completed_at:
+					adminEditForm.status === 'completed'
+						? selectedProject.completed_at || new Date().toISOString()
+						: null,
 			})
 			fetchProjects()
 		} catch (error) {
@@ -821,7 +956,9 @@ export function ProjectsFeed() {
 	}
 
 	const handleAdminFormChange = (
-		e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+		e: React.ChangeEvent<
+			HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+		>,
 	) => {
 		const { name, value } = e.target
 		setAdminEditForm(prev => ({
@@ -880,6 +1017,18 @@ export function ProjectsFeed() {
 	}
 
 	const renderProjectButton = (project: Project) => {
+		const projectStatus = getProjectStatus(project)
+		if (projectStatus !== 'recruiting' && user?.id !== project.owner_id) {
+			return (
+				<button
+					disabled
+					className='flex-1 bg-black/10 dark:bg-white/10 text-[var(--muted)] py-2 rounded-2xl font-bold cursor-not-allowed'
+				>
+					{PROJECT_STATUS_LABELS[projectStatus]}
+				</button>
+			)
+		}
+
 		if (!user) {
 			return (
 				<button
@@ -954,7 +1103,7 @@ export function ProjectsFeed() {
 			<h1 className='text-4xl font-bold text-[var(--text)] mb-8'>Проекты</h1>
 
 			<div className='card p-6 mb-8'>
-				<div className='flex items-end justify-between gap-4 mb-4'>
+				<div className='flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-4'>
 					<div className='flex-1'>
 						<label className='block text-sm font-medium text-[var(--muted)] mb-2'>
 							Поиск проектов
@@ -971,11 +1120,11 @@ export function ProjectsFeed() {
 						</div>
 					</div>
 					{user && (
-						<div className='flex gap-2'>
+						<div className='flex flex-wrap gap-2'>
 							<div className='flex rounded-2xl border border-[var(--border)] overflow-hidden'>
 								<button
 									onClick={() => setFilterMode('all')}
-									className={`px-4 py-2 rounded-l-lg font-medium transition ${
+									className={`px-4 py-2 font-medium transition ${
 										filterMode === 'all'
 											? 'bg-[var(--accent)] text-white'
 											: 'bg-[var(--card)] text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10'
@@ -984,8 +1133,21 @@ export function ProjectsFeed() {
 									Все проекты
 								</button>
 								<button
+									onClick={() => setFilterMode('recommended')}
+									disabled={!profile}
+									className={`px-4 py-2 font-medium transition inline-flex items-center gap-1 disabled:opacity-50 ${
+										filterMode === 'recommended'
+											? 'bg-[var(--accent)] text-white'
+											: 'bg-[var(--card)] text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10'
+									}`}
+									title={profile ? 'Проекты, подходящие вашему профилю' : 'Сначала заполните профиль'}
+								>
+									<Sparkles className='w-4 h-4' />
+									Для меня
+								</button>
+								<button
 									onClick={() => setFilterMode('my')}
-									className={`px-4 py-2 rounded-r-lg font-medium transition ${
+									className={`px-4 py-2 font-medium transition ${
 										filterMode === 'my'
 											? 'bg-[var(--accent)] text-white'
 											: 'bg-[var(--card)] text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10'
@@ -1029,6 +1191,19 @@ export function ProjectsFeed() {
 									<span className='text-[var(--muted)]'>Нет изображения</span>
 								</div>
 							)}
+
+							<div className='flex flex-wrap gap-2 mb-3'>
+								<span className={`badge ${getProjectStatus(project) === 'completed' ? 'text-amber-600' : ''}`}>
+									{getProjectStatus(project) === 'completed' && <Trophy className='w-3.5 h-3.5' />}
+									{PROJECT_STATUS_LABELS[getProjectStatus(project)]}
+								</span>
+								{(projectRecommendations.get(project.id)?.score || 0) > 0 && (
+									<span className='badge text-[var(--accent)]'>
+										<Sparkles className='w-3.5 h-3.5' />
+										Подходит на {projectRecommendations.get(project.id)?.score}%
+									</span>
+								)}
+							</div>
 
 							<h2 className='text-xl font-bold text-[var(--text)] mb-2'>
 								{project.title}
@@ -1287,6 +1462,41 @@ export function ProjectsFeed() {
 
 							<div>
 								<label className='block text-sm font-medium text-[var(--muted)] mb-2'>
+									Статус проекта
+								</label>
+								<select
+									name='status'
+									value={adminEditForm.status}
+									onChange={handleAdminFormChange}
+									className='w-full px-4 py-2 border border-[var(--border)] bg-[var(--card)] text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+								>
+									<option value='recruiting'>Идёт набор</option>
+									<option value='team_formed'>Команда сформирована</option>
+									<option value='completed'>Проект завершён</option>
+								</select>
+								<p className='text-xs text-[var(--muted)] mt-1'>
+									После завершения проект появится в портфолио участников.
+								</p>
+							</div>
+
+							{adminEditForm.status === 'completed' && (
+								<div>
+									<label className='block text-sm font-medium text-[var(--muted)] mb-2'>
+										Ссылка на результат
+									</label>
+									<input
+										type='url'
+										name='result_url'
+										value={adminEditForm.result_url}
+										onChange={handleAdminFormChange}
+										placeholder='GitHub, презентация или готовый результат'
+										className='w-full px-4 py-2 border border-[var(--border)] bg-[var(--card)] text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+									/>
+								</div>
+							)}
+
+							<div>
+								<label className='block text-sm font-medium text-[var(--muted)] mb-2'>
 									Ссылка на обложку
 								</label>
 								<input
@@ -1353,6 +1563,43 @@ export function ProjectsFeed() {
 								)}
 							</div>
 
+							{/* Recommended participants */}
+							<div className='border-t border-[var(--border)] pt-6'>
+								<h3 className='text-lg font-bold text-[var(--text)] mb-2 flex items-center gap-2'>
+									<Sparkles className='w-5 h-5 text-[var(--accent)]' />
+									Рекомендуемые участники
+								</h3>
+								<p className='text-sm text-[var(--muted)] mb-4'>
+									Подбор по свободным ролям, специализации и навыкам.
+								</p>
+								{recommendationsLoading ? (
+									<p className='text-[var(--muted)]'>Подбираем участников...</p>
+								) : recommendedParticipants.length === 0 ? (
+									<p className='text-[var(--muted)]'>Подходящих участников пока нет</p>
+								) : (
+									<div className='grid gap-3 sm:grid-cols-2'>
+										{recommendedParticipants.map(item => (
+											<div key={item.profile.id} className='rounded-2xl border border-[var(--border)] p-4 bg-black/5 dark:bg-white/5'>
+												<div className='flex items-start justify-between gap-2'>
+													<div>
+														<p className='font-bold text-[var(--text)]'>{item.profile.name || 'Без имени'}</p>
+														<p className='text-xs text-[var(--muted)]'>{item.profile.specialization || item.profile.faculty || 'Специализация не указана'}</p>
+													</div>
+													<span className='badge text-[var(--accent)]'>{item.recommendation.score}%</span>
+												</div>
+												{item.recommendation.roleLabel && (
+													<p className='text-sm text-[var(--text)] mt-3'>На роль: <span className='font-semibold'>{item.recommendation.roleLabel}</span></p>
+												)}
+												<p className='text-xs text-[var(--muted)] mt-1'>{item.recommendation.reasons.join(', ')}</p>
+												{item.profile.contacts && (
+													<p className='text-sm text-[var(--accent)] mt-3 break-words'>{item.profile.contacts}</p>
+												)}
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+
 							{/* Delete Project */}
 							<div className='border-t pt-6'>
 								<button
@@ -1407,6 +1654,23 @@ export function ProjectsFeed() {
 								</div>
 							)}
 
+							<div className='flex flex-wrap items-center gap-3'>
+								<span className={`badge ${getProjectStatus(selectedProject) === 'completed' ? 'text-amber-600' : ''}`}>
+									{getProjectStatus(selectedProject) === 'completed' && <Trophy className='w-4 h-4' />}
+									{PROJECT_STATUS_LABELS[getProjectStatus(selectedProject)]}
+								</span>
+								{safeExternalUrl(selectedProject.result_url) && (
+									<a
+										href={safeExternalUrl(selectedProject.result_url) || undefined}
+										target='_blank'
+										rel='noreferrer'
+										className='inline-flex items-center gap-1 text-sm font-semibold text-[var(--accent)] hover:underline'
+									>
+										Посмотреть результат <ExternalLink className='w-4 h-4' />
+									</a>
+								)}
+							</div>
+
 							{/* Project Description */}
 							<div>
 								<h3 className='text-lg font-bold text-[var(--text)] mb-2'>
@@ -1439,7 +1703,10 @@ export function ProjectsFeed() {
 												const role = parseStoredRole(rawRole)
 												const isFull = role.filled === 1
 												const status = getUserProjectStatus(selectedProject)
-												const canApply = status === 'can_apply' && !isFull
+												const canApply =
+													status === 'can_apply' &&
+													!isFull &&
+													getProjectStatus(selectedProject) === 'recruiting'
 
 												return (
 													<button

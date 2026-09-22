@@ -26,7 +26,9 @@ export function parseRoleSlot(raw: string): RoleSlot {
 					const rawTaken =
 						typeof p.taken === 'number' && Number.isFinite(p.taken)
 							? Math.floor(p.taken)
-							: 0
+							: p.filled === 1
+								? 1
+								: 0
 					const taken = Math.min(Math.max(0, rawTaken), total)
 					return {
 						key,

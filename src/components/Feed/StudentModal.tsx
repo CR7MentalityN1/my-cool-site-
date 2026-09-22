@@ -1,5 +1,6 @@
 import { X, User, Mail } from 'lucide-react'
 import type { Database } from '../../lib/database.types'
+import { CompletedProjects } from '../Profile/CompletedProjects'
 
 type Profile = Database['public']['Tables']['profiles']['Row']
 
@@ -97,6 +98,10 @@ export function StudentModal({ profile, onClose }: StudentModalProps) {
 							<p className='text-[var(--text)]/90'>{profile.contacts}</p>
 						</div>
 					)}
+
+					<div className='mt-6 border-t border-[var(--border)] pt-6'>
+						<CompletedProjects userId={profile.auth_id} />
+					</div>
 				</div>
 			</div>
 		</div>

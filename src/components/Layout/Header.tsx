@@ -32,20 +32,20 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 	return (
 		<header className='bg-[var(--card)] shadow-sm border-b border-[var(--border)]'>
 			<div className='max-w-7xl mx-auto px-4 py-4'>
-				<div className='flex items-center justify-between'>
+				<div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
 					<button
 						onClick={() => onNavigate('feed')}
-						className='text-2xl font-bold text-[var(--accent)] hover:opacity-90 transition'
+						className='text-left text-lg sm:text-xl lg:text-2xl font-bold text-[var(--accent)] hover:opacity-90 transition'
 					>
 						Платформа междисциплинарных проектов
 					</button>
 
-					<nav className='flex items-center space-x-6'>
+					<nav className='flex w-full lg:w-auto items-center gap-2 overflow-x-auto pb-1 lg:pb-0'>
 						<button
 							type='button'
 							onClick={toggleTheme}
 							aria-label='Переключить тему'
-							className='p-2 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--accent-2)] transition'
+							className='p-2 shrink-0 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--accent-2)] transition'
 						>
 							{theme === 'dark' ? (
 								<Sun className='w-5 h-5 text-[var(--text)]' />
@@ -56,7 +56,7 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 
 						<button
 							onClick={() => onNavigate('projects')}
-							className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
 								currentPage === 'projects'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -68,7 +68,7 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 
 						<button
 							onClick={() => onNavigate('feed')}
-							className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
 								currentPage === 'feed'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -80,7 +80,7 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 
 						<button
 							onClick={() => onNavigate('chat')}
-							className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
 								currentPage === 'chat'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -92,7 +92,7 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 
 						<button
 							onClick={() => onNavigate('profile')}
-							className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
 								currentPage === 'profile'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -104,7 +104,7 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 
 						<button
 							onClick={handleLogout}
-							className='flex items-center space-x-2 px-4 py-2 text-red-600 hover:bg-red-500/10 rounded-lg transition'
+							className='flex shrink-0 items-center space-x-2 px-3 py-2 text-red-600 hover:bg-red-500/10 rounded-lg transition'
 						>
 							<LogOut className='w-5 h-5' />
 							<span className='font-medium'>Выйти</span>
