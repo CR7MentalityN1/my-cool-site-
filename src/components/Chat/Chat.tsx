@@ -8,38 +8,112 @@ type Message = Database['public']['Tables']['messages']['Row'] & {
 	profiles?: {
 		name: string | null
 		avatar_url: string | null
+	} | null
+}
+
+const mergeMessages = (current: Message[], incoming: Message[]): Message[] => {
+	const byId = new Map(current.map(message => [message.id, message]))
+	for (const message of incoming) {
+		const previous = byId.get(message.id)
+		byId.set(message.id, {
+			...previous,
+			...message,
+			profiles: message.profiles ?? previous?.profiles,
+		})
 	}
+	return [...byId.values()]
+		.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+		.slice(-30)
 }
 
 export function Chat() {
 	const [messages, setMessages] = useState<Message[]>([])
 	const [newMessage, setNewMessage] = useState('')
 	const [loading, setLoading] = useState(false)
+	const [sendError, setSendError] = useState('')
 	const { profile } = useAuth()
 	const messagesEndRef = useRef<HTMLDivElement>(null)
+	const sendingRef = useRef(false)
+	const profileRef = useRef(profile)
+	const profileCacheRef = useRef(new Map<string, NonNullable<Message['profiles']>>())
 	const emojiList = ['😊', '😂', '🔥', '👍', '❤️', '🚀']
+	profileRef.current = profile
 
 	useEffect(() => {
-		fetchMessages()
+		let active = true
+		const loadingProfiles = new Set<string>()
+
+		const fetchMessages = async () => {
+			try {
+				const { data, error } = await supabase
+					.from('messages')
+					.select('*, profiles (name, avatar_url)')
+					.order('created_at', { ascending: false })
+					.order('id', { ascending: false })
+					.limit(30)
+				if (error) throw error
+				if (!active) return
+				const recentMessages = (data || []) as Message[]
+				for (const message of recentMessages) {
+					if (message.profiles) profileCacheRef.current.set(message.user_id, message.profiles)
+				}
+				setMessages(previous => mergeMessages(previous, recentMessages))
+			} catch (error) {
+				if (!active) return
+				console.error('Error fetching messages:', error)
+				alert('Не удалось загрузить сообщения')
+			}
+		}
+
+		void fetchMessages()
 
 		const channel = supabase
-			.channel('schema-db-changes')
+			.channel('chat-messages')
 			.on(
 				'postgres_changes',
 				{ event: 'INSERT', schema: 'public', table: 'messages' },
 				payload => {
-					const newMessage = payload.new as Message | null
-					if (!newMessage) return
+					if (!active) return
+					const message = payload.new as Message | null
+					if (!message?.id) return
 
-					setMessages(prev => [...prev, newMessage])
+					const ownProfile = profileRef.current
+					if (ownProfile?.id === message.user_id) {
+						profileCacheRef.current.set(message.user_id, {
+							name: ownProfile.name,
+							avatar_url: ownProfile.avatar_url,
+						})
+					}
+					const cachedProfile = profileCacheRef.current.get(message.user_id)
+					setMessages(previous => mergeMessages(previous, [{ ...message, profiles: cachedProfile }]))
+					if (cachedProfile || loadingProfiles.has(message.user_id)) return
 
-					fetchMessageWithProfile(newMessage.id)
+					loadingProfiles.add(message.user_id)
+					void supabase.from('profiles')
+						.select('name, avatar_url')
+						.eq('id', message.user_id)
+						.maybeSingle()
+						.then(({ data, error }) => {
+							loadingProfiles.delete(message.user_id)
+							if (!active) return
+							if (error) {
+								console.error('Error fetching message profile:', error)
+								return
+							}
+							if (data) {
+								profileCacheRef.current.set(message.user_id, data)
+								setMessages(previous => previous.map(item =>
+									item.user_id === message.user_id ? { ...item, profiles: data } : item,
+								))
+							}
+						})
 				},
 			)
 			.subscribe()
 
 		return () => {
-			supabase.removeChannel(channel)
+			active = false
+			void supabase.removeChannel(channel)
 		}
 	}, [])
 
@@ -47,77 +121,34 @@ export function Chat() {
 		scrollToBottom()
 	}, [messages])
 
-	const fetchMessages = async () => {
-		try {
-			const { data, error } = await supabase
-				.from('messages')
-				.select(
-					`
-          *,
-          profiles (
-            name,
-            avatar_url
-          )
-        `,
-				)
-				.order('created_at', { ascending: true })
-				.limit(30)
-
-			if (error) throw error
-			setMessages(data || [])
-		} catch (error) {
-			console.error('Error fetching messages:', error)
-			alert('Не удалось загрузить сообщения')
-		}
-	}
-
-	const fetchMessageWithProfile = async (messageId: string) => {
-		try {
-			const { data, error } = await supabase
-				.from('messages')
-				.select(
-					`
-          *,
-          profiles (
-            name,
-            avatar_url
-          )
-        `,
-				)
-				.eq('id', messageId)
-				.single()
-
-			if (error) throw error
-			if (data) {
-				setMessages(prev =>
-					prev.some(message => message.id === data.id)
-						? prev.map(message => (message.id === data.id ? data : message))
-						: [...prev, data],
-				)
-			}
-		} catch (error) {
-			console.error('Error fetching new message:', error)
-		}
-	}
-
 	const scrollToBottom = () => {
 		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
 	}
 
 	const appendEmoji = (emoji: string) => {
-		setNewMessage(prev => prev + emoji)
+		setNewMessage(prev => prev.length + emoji.length <= 1000 ? prev + emoji : prev)
 	}
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault()
-		if (!newMessage.trim() || !profile) return
+		if (sendingRef.current) return
+		setSendError('')
 
 		const content = newMessage.trim()
+		if (!content) {
+			setSendError('Введите сообщение')
+			return
+		}
+		if (!profile?.id || !profile.name) {
+			setSendError('Заполните свой профиль, чтобы отправлять сообщения')
+			return
+		}
 		if (content.length > 1000) {
-			alert('Сообщение слишком длинное (макс. 1000 символов)')
+			setSendError('Сообщение слишком длинное (макс. 1000 символов)')
 			return
 		}
 
+		sendingRef.current = true
 		setLoading(true)
 		try {
 			const { error } = await supabase.from('messages').insert({
@@ -128,8 +159,9 @@ export function Chat() {
 			setNewMessage('')
 		} catch (error) {
 			console.error('Error sending message:', error)
-			alert('Не удалось отправить сообщение')
+			setSendError('Не удалось отправить сообщение. Попробуйте ещё раз.')
 		} finally {
+			sendingRef.current = false
 			setLoading(false)
 		}
 	}
@@ -226,7 +258,11 @@ export function Chat() {
 						<input
 							type='text'
 							value={newMessage}
-							onChange={e => setNewMessage(e.target.value)}
+							onChange={e => {
+								setNewMessage(e.target.value)
+								if (sendError) setSendError('')
+							}}
+							maxLength={1000}
 							placeholder='Введите сообщение...'
 							className='flex-1 px-4 py-2 border border-[var(--border)] bg-[var(--card)] text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 							disabled={loading || !profile?.name}
@@ -240,6 +276,9 @@ export function Chat() {
 							<span>Отправить</span>
 						</button>
 					</div>
+					{sendError && (
+						<p role='alert' className='text-sm text-red-600 mt-2'>{sendError}</p>
+					)}
 					{!profile?.name && (
 						<p className='text-sm text-red-600 mt-2'>
 							Заполните свой профиль, чтобы отправлять сообщения

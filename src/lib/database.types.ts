@@ -197,6 +197,19 @@ export interface Database {
 			}
 		}
 		Views: { [_ in never]: never }
-		Functions: { [_ in never]: never }
+		Functions: {
+			accept_project_application: {
+				Args: { p_application_id: string }
+				Returns: Database['public']['Tables']['projects']['Row']
+			}
+			pending_project_application_counts: {
+				Args: { p_project_ids: string[] }
+				Returns: {
+					project_id: string
+					role_applied_for: string | null
+					application_count: number
+				}[]
+			}
+		}
 	}
 }

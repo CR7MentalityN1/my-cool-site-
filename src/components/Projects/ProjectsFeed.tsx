@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import {
@@ -85,8 +85,8 @@ type ProjectRole = {
 type StoredProjectRole = {
 	faculty: string
 	specialization: string
-	filled: 0 | 1
 	count: number
+	taken: number
 }
 
 const serializeStoredRole = (role: StoredProjectRole) => JSON.stringify(role)
@@ -98,27 +98,44 @@ const parseStoredRole = (
 	label: string
 	faculty: string | null
 	specialization: string | null
-	filled: 0 | 1
 	count: number
+	taken: number
 } => {
-	// New format: JSON string with { faculty, specialization, filled }
+	// Supports both current count/taken and legacy filled roles.
 	if (raw.trim().startsWith('{')) {
 		try {
-			const parsed = JSON.parse(raw) as Partial<StoredProjectRole>
+			const parsed = JSON.parse(raw) as Partial<StoredProjectRole> & {
+				filled?: number
+				label?: string
+			}
 			if (
 				typeof parsed?.faculty === 'string' &&
 				typeof parsed?.specialization === 'string'
 			) {
-				const filled = parsed.filled === 1 ? 1 : 0
-				const count = parsed.count || 1
+				const count = Math.max(1, Math.floor(parsed.count || 1))
+				const taken = Math.min(
+					count,
+					Math.max(0, Math.floor(parsed.taken ?? parsed.filled ?? 0)),
+				)
 				const label = `${parsed.faculty} — ${parsed.specialization}${count > 1 ? ` (${count})` : ''}`
 				return {
 					key: label,
 					label,
 					faculty: parsed.faculty,
 					specialization: parsed.specialization,
-					filled,
+					taken,
 					count,
+				}
+			}
+			if (typeof parsed.label === 'string') {
+				const count = Math.max(1, Math.floor(parsed.count || 1))
+				return {
+					key: parsed.label,
+					label: parsed.label,
+					faculty: null,
+					specialization: null,
+					count,
+					taken: Math.min(count, Math.max(0, Math.floor(parsed.taken ?? parsed.filled ?? 0))),
 				}
 			}
 		} catch {
@@ -132,14 +149,14 @@ const parseStoredRole = (
 		const faculty = parts[0]
 		const specialization = parts.slice(1).join(' — ')
 		const label = `${faculty} — ${specialization}`
-		return { key: label, label, faculty, specialization, filled: 0, count: 1 }
+		return { key: label, label, faculty, specialization, taken: 0, count: 1 }
 	}
 	return {
 		key: raw,
 		label: raw,
 		faculty: null,
 		specialization: null,
-		filled: 0,
+		taken: 0,
 		count: 1,
 	}
 }
@@ -237,6 +254,7 @@ export function ProjectsFeed() {
 	const [selectedProject, setSelectedProject] = useState<Project | null>(null)
 	const [applications, setApplications] = useState<ApplicationWithProfile[]>([])
 	const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+	const roleOptionsRef = useRef<HTMLDivElement>(null)
 	const [adminEditForm, setAdminEditForm] = useState<AdminEditForm>({
 		description: '',
 		image_url: '',
@@ -254,7 +272,7 @@ export function ProjectsFeed() {
 	const [userProjectStatuses, setUserProjectStatuses] = useState<
 		Record<string, UserProjectStatus>
 	>({})
-	const [currentUserName, setCurrentUserName] = useState<string>('')
+	const [memberProjectIds, setMemberProjectIds] = useState<Set<string>>(new Set())
 	const [roleApplicationCounts, setRoleApplicationCounts] = useState<
 		Record<string, RoleApplicationCount>
 	>({})
@@ -282,27 +300,6 @@ export function ProjectsFeed() {
 		fetchProjects()
 	}, [])
 
-	useEffect(() => {
-		if (user) {
-			const fetchUserName = async () => {
-				try {
-					const { data } = await supabase
-						.from('profiles')
-						.select('name')
-						.eq('auth_id', user.id)
-						.single()
-					const typedData = data as { name: string | null } | null
-					setCurrentUserName(
-						typedData?.name || user.user_metadata?.full_name || '',
-					)
-				} catch {
-					setCurrentUserName(user.user_metadata?.full_name || '')
-				}
-			}
-			fetchUserName()
-		}
-	}, [user])
-
 	const fetchProjects = async () => {
 		setLoading(true)
 		const { data, error } = await supabase
@@ -313,115 +310,65 @@ export function ProjectsFeed() {
 		if (error) {
 			console.error('Error fetching projects:', error)
 		} else {
-			// Fetch owner names
-			const projectsWithOwners = await Promise.all(
-				((data as Database['public']['Tables']['projects']['Row'][]) || []).map(
-					async project => {
-						try {
-							const { data: profileData } = await supabase
-								.from('profiles')
-								.select('name')
-								.eq('auth_id', project.owner_id)
-								.maybeSingle()
-
-							const typedProfileData = profileData as {
-								name: string | null
-							} | null
-
-							return {
-								...project,
-								profiles: {
-									full_name: typedProfileData?.name || null,
-								},
-							} as Project
-						} catch {
-							return {
-								...project,
-								profiles: {
-									full_name: null,
-								},
-							} as Project
-						}
-					},
-				),
-			)
+			const projectRows = data || []
+			const ownerIds = [...new Set(projectRows.map(project => project.owner_id))]
+			const { data: ownerProfiles, error: ownerError } = ownerIds.length
+				? await supabase.from('profiles').select('auth_id, name').in('auth_id', ownerIds)
+				: { data: [], error: null }
+			if (ownerError) console.error('Error fetching project owners:', ownerError)
+			const ownerNames = new Map((ownerProfiles || []).map(owner => [owner.auth_id, owner.name]))
+			const projectsWithOwners: Project[] = projectRows.map(project => ({
+				...project,
+				profiles: { full_name: ownerNames.get(project.owner_id) || null },
+			}))
 			setProjects(projectsWithOwners)
 		}
 		setLoading(false)
 	}
 
-	const fetchRoleApplicationCounts = useCallback(async (projectId: string) => {
-		try {
-			const { data, error } = await supabase
-				.from('project_applications')
-				.select('role_applied_for, status')
-				.eq('project_id', projectId)
-				.eq('status', 'pending')
-
-			if (error) {
-				console.error('Error fetching applications:', error)
-				return {}
-			}
-
-			const counts: RoleApplicationCount = {}
-			if (data) {
-				const typedData = data as Array<{
-					role_applied_for: string | null
-					status: string
-				}>
-				typedData.forEach(app => {
-					const role = app.role_applied_for || 'общая заявка'
-					counts[role] = (counts[role] || 0) + 1
-				})
-			}
-
-			setRoleApplicationCounts(prev => ({
-				...prev,
-				[projectId]: counts,
-			}))
-
-			return counts
-		} catch (error) {
-			console.error('Error:', error)
-			return {}
+	const refreshProjectMetadata = useCallback(async () => {
+		if (!user || projects.length === 0) {
+			setUserProjectStatuses({})
+			setRoleApplicationCounts({})
+			setMemberProjectIds(new Set())
+			return
 		}
-	}, [])
 
-	const checkUserStatusForAllProjects = useCallback(async () => {
-		if (!user) return
+		const projectIds = projects.map(project => project.id)
+		const [applicationsResult, countsResult, membersResult] = await Promise.all([
+			supabase.from('project_applications')
+				.select('project_id')
+				.in('project_id', projectIds).eq('user_id', user.id).eq('status', 'pending'),
+			supabase.rpc('pending_project_application_counts', { p_project_ids: projectIds }),
+			supabase.from('project_members')
+				.select('project_id').in('project_id', projectIds).eq('user_id', user.id),
+		])
+		if (applicationsResult.error || countsResult.error || membersResult.error) {
+			console.error('Error fetching project metadata:',
+				applicationsResult.error || countsResult.error || membersResult.error)
+			return
+		}
 
+		const counts: Record<string, RoleApplicationCount> = {}
+		for (const item of countsResult.data || []) {
+			const role = item.role_applied_for || 'общая заявка'
+			counts[item.project_id] ||= {}
+			counts[item.project_id][role] = item.application_count
+		}
+		const appliedProjectIds = new Set((applicationsResult.data || []).map(app => app.project_id))
+		const memberIds = new Set((membersResult.data || []).map(member => member.project_id))
 		const statuses: Record<string, UserProjectStatus> = {}
-
 		for (const project of projects) {
-			if (user.id === project.owner_id) {
-				statuses[project.id] = 'owner'
-			} else if (project.current_members?.includes(currentUserName)) {
-				statuses[project.id] = 'in_team'
-			} else {
-				// Check if has application
-				const { data: appData } = await supabase
-					.from('project_applications')
-					.select('*')
-					.eq('project_id', project.id)
-					.eq('user_id', user.id)
-					.eq('status', 'pending')
-					.maybeSingle()
-
-				statuses[project.id] = appData ? 'has_application' : 'can_apply'
-			}
+			statuses[project.id] = project.owner_id === user.id ? 'owner'
+				: memberIds.has(project.id) ? 'in_team'
+				: appliedProjectIds.has(project.id) ? 'has_application' : 'can_apply'
 		}
-
+		setRoleApplicationCounts(counts)
+		setMemberProjectIds(memberIds)
 		setUserProjectStatuses(statuses)
-	}, [user, projects, currentUserName])
+	}, [user, projects])
 
-	useEffect(() => {
-		if (user && projects.length > 0) {
-			checkUserStatusForAllProjects()
-			projects.forEach(project => {
-				fetchRoleApplicationCounts(project.id)
-			})
-		}
-	}, [user, projects, checkUserStatusForAllProjects, fetchRoleApplicationCounts])
+	useEffect(() => { void refreshProjectMetadata() }, [refreshProjectMetadata])
 
 	const getUserProjectStatus = (project: Project): UserProjectStatus => {
 		return userProjectStatuses[project.id] || 'can_apply'
@@ -434,7 +381,7 @@ export function ProjectsFeed() {
 			filtered = filtered.filter(
 				p =>
 					p.owner_id === user.id ||
-					p.current_members?.includes(currentUserName),
+					memberProjectIds.has(p.id),
 			)
 		}
 
@@ -467,7 +414,7 @@ export function ProjectsFeed() {
 		filterMode,
 		user,
 		profile,
-		currentUserName,
+		memberProjectIds,
 		projectRecommendations,
 	])
 
@@ -483,23 +430,41 @@ export function ProjectsFeed() {
 			alert('Набор в этот проект уже закрыт')
 			return
 		}
+		const roleKey = roleAppliedFor?.trim()
+		const selectedRole = project.required_roles?.map(parseStoredRole)
+			.find(role => role.key === roleKey)
+		if (!roleKey || !selectedRole || selectedRole.taken >= selectedRole.count) {
+			alert('Выберите свободную роль')
+			return
+		}
 
-		const userFullName = user.user_metadata?.full_name || ''
-
-		// Check if already in team
-		if (project.current_members?.includes(userFullName)) {
+		// Membership is keyed by user_id, never by a display name.
+		const { data: membership, error: membershipError } = await supabase
+			.from('project_members').select('id')
+			.eq('project_id', projectId).eq('user_id', user.id).maybeSingle()
+		if (membershipError) {
+			console.error('Error checking membership:', membershipError)
+			alert('Не удалось проверить участие в проекте')
+			return
+		}
+		if (project.owner_id === user.id || membership) {
 			alert('Вы уже в этой команде')
 			return
 		}
 
 		// Check if already has application
-		const { data: existingApp } = await supabase
+		const { data: existingApp, error: applicationError } = await supabase
 			.from('project_applications')
 			.select('*')
 			.eq('project_id', projectId)
 			.eq('user_id', user.id)
 			.eq('status', 'pending')
 			.maybeSingle()
+		if (applicationError) {
+			console.error('Error checking application:', applicationError)
+			alert('Не удалось проверить заявку')
+			return
+		}
 
 		if (existingApp) {
 			alert('Вы уже подали заявку на этот проект')
@@ -516,7 +481,7 @@ export function ProjectsFeed() {
 
 			const insertDataWithRole = {
 				...insertData,
-				role_applied_for: roleAppliedFor?.trim() ? roleAppliedFor.trim() : null,
+				role_applied_for: roleKey,
 			}
 
 			const { error } = await supabase
@@ -528,8 +493,7 @@ export function ProjectsFeed() {
 				alert('Ошибка при подаче заявки')
 			} else {
 				alert('Заявка успешно подана!')
-				checkUserStatusForAllProjects()
-				fetchRoleApplicationCounts(projectId)
+				void refreshProjectMetadata()
 			}
 		} catch (error) {
 			console.error('Error:', error)
@@ -578,12 +542,12 @@ export function ProjectsFeed() {
 		setIsSubmitting(true)
 
 		try {
-			// Store roles as JSON strings with filled counter 0/1
+			// Store the requested capacity and initial occupancy.
 			const rolesArray = createFormData.roles.map(role =>
 				serializeStoredRole({
 					faculty: role.faculty,
 					specialization: role.specialization,
-					filled: 0,
+					taken: 0,
 					count: role.count || 1,
 				}),
 			)
@@ -645,7 +609,7 @@ export function ProjectsFeed() {
 				return {
 					faculty: parsed.faculty || '',
 					specialization: parsed.specialization || '',
-					filled: parsed.filled || 0,
+					taken: parsed.taken,
 					count: parsed.count || 1,
 				}
 			},
@@ -662,7 +626,7 @@ export function ProjectsFeed() {
 		setRecommendationsLoading(true)
 
 		try {
-			const [{ data, error }, { data: profilesData, error: profilesError }] =
+			const [{ data, error }, { data: profilesData, error: profilesError }, { data: membersData, error: membersError }] =
 				await Promise.all([
 					supabase
 						.from('project_applications')
@@ -670,6 +634,7 @@ export function ProjectsFeed() {
 						.eq('project_id', project.id)
 						.eq('status', 'pending'),
 					supabase.from('profiles').select('*'),
+					supabase.from('project_members').select('user_id').eq('project_id', project.id),
 				])
 
 			if (error) {
@@ -677,43 +642,25 @@ export function ProjectsFeed() {
 			} else {
 				const apps = (data || []) as ProjectApplication[]
 
-				// Fetch profile data for applicants
-				const appsWithProfiles: ApplicationWithProfile[] = []
-				for (const app of apps) {
-					try {
-						const { data: profileData } = await supabase
-							.from('profiles')
-							.select('name, faculty')
-							.eq('auth_id', app.user_id)
-							.maybeSingle()
-
-						const typedProfileData = profileData as ProfileRow | null
-
-						appsWithProfiles.push({
-							...app,
-							applicantName: typedProfileData?.name || 'Участник',
-							applicantFaculty: typedProfileData?.faculty || 'Не указано',
-						})
-					} catch {
-						appsWithProfiles.push({
-							...app,
-							applicantName: 'Участник',
-							applicantFaculty: 'Не указано',
-						})
-					}
-				}
+				const profilesById = new Map((profilesData || []).map(candidate => [candidate.auth_id, candidate]))
+				const appsWithProfiles: ApplicationWithProfile[] = apps.map(app => ({
+					...app,
+					applicantName: profilesById.get(app.user_id)?.name || 'Участник',
+					applicantFaculty: profilesById.get(app.user_id)?.faculty || 'Не указано',
+				}))
 				setApplications(appsWithProfiles)
 			}
 
 			if (profilesError) {
 				console.error('Error fetching recommended participants:', profilesError)
 			} else {
-				const currentMemberNames = new Set(project.current_members || [])
+				if (membersError) console.error('Error fetching project members:', membersError)
+				const currentMemberIds = new Set((membersData || []).map(member => member.user_id))
 				const recommended = (profilesData || [])
 					.filter(
 						candidate =>
 							candidate.auth_id !== project.owner_id &&
-							!currentMemberNames.has(candidate.name || ''),
+							!currentMemberIds.has(candidate.auth_id),
 					)
 					.map(candidate => ({
 						profile: candidate,
@@ -736,7 +683,19 @@ export function ProjectsFeed() {
 	const openViewModal = (project: Project) => {
 		setSelectedProject(project)
 		setIsViewModalOpen(true)
-		fetchRoleApplicationCounts(project.id)
+	}
+
+	const openRoleSelection = (project: Project) => {
+		const hasFreeRole = (project.required_roles || []).some(raw => {
+			const role = parseStoredRole(raw)
+			return Boolean(role.key.trim()) && role.taken < role.count
+		})
+		if (!hasFreeRole) {
+			alert('Свободных ролей нет')
+			return
+		}
+		openViewModal(project)
+		requestAnimationFrame(() => roleOptionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
 	}
 
 	const handleAcceptApplication = async (
@@ -750,82 +709,9 @@ export function ProjectsFeed() {
 				return
 			}
 
-			const applicantName = application.applicantName || 'Участник'
-
-			// Check for duplicates before adding
-			const currentMembers = selectedProject.current_members || []
-			if (currentMembers.includes(applicantName)) {
-				alert('Этот пользователь уже в команде')
-				return
-			}
-
-			const updatedMembers = [...currentMembers, applicantName]
-
-			// Mark role as filled (0/1) if application targeted a specific role
-			const roleKey = application.role_applied_for
-			let updatedRequiredRoles = selectedProject.required_roles || []
-			if (roleKey) {
-				const roleEntry = updatedRequiredRoles.find(
-					r => parseStoredRole(r).key === roleKey,
-				)
-				if (roleEntry) {
-					const parsed = parseStoredRole(roleEntry)
-					if (parsed.filled === 1) {
-						alert('Эта позиция уже закрыта')
-						return
-					}
-					updatedRequiredRoles = updatedRequiredRoles.map(r =>
-						parseStoredRole(r).key === roleKey
-							? serializeStoredRole({
-									faculty: parsed.faculty || '',
-									specialization: parsed.specialization || '',
-									count: 1, // Добавляем обязательное поле (количество нужных людей)
-									filled: 1, // Оставляем заполненность
-								})
-							: r,
-					)
-				}
-			}
-
-			// Update project with new member (and filled role if applicable)
-			const projectUpdateData: ProjectUpdateData = {
-				current_members: updatedMembers,
-				required_roles: updatedRequiredRoles,
-			}
-			const { error: updateError } = await supabase
-				.from('projects')
-				.update(projectUpdateData)
-				.eq('id', selectedProject.id)
-				.eq('owner_id', user.id)
-
-			if (updateError) throw updateError
-
-			// Update application status to accepted
-			const applicationUpdateData: ProjectApplicationUpdateData = {
-				status: 'accepted',
-			}
-			const { error: statusError } = await supabase
-				.from('project_applications')
-				.update(applicationUpdateData)
-				.eq('id', application.id)
-
-			if (statusError) throw statusError
-
-			// Store membership by user id for reliable portfolio records.
-			// The existing name list is kept for backward compatibility.
-			const { error: memberError } = await supabase
-				.from('project_members')
-				.upsert(
-					{
-						project_id: selectedProject.id,
-						user_id: application.user_id,
-						role: application.role_applied_for,
-					},
-					{ onConflict: 'project_id,user_id' },
-				)
-			if (memberError) {
-				console.error('Error saving project member:', memberError)
-			}
+			const { data: updatedProject, error } = await supabase
+				.rpc('accept_project_application', { p_application_id: application.id })
+			if (error) throw error
 
 			alert('Заявка принята!')
 			setApplications(applications.filter(app => app.id !== application.id))
@@ -834,18 +720,13 @@ export function ProjectsFeed() {
 			)
 
 			// Update selected project
-			setSelectedProject({
-				...selectedProject,
-				current_members: updatedMembers,
-				required_roles: updatedRequiredRoles,
-			})
+			setSelectedProject({ ...updatedProject, profiles: selectedProject.profiles })
 
 			// Refresh projects and statuses
-			fetchProjects()
-			checkUserStatusForAllProjects()
+			void fetchProjects()
 		} catch (error) {
 			console.error('Error accepting application:', error)
-			alert('Ошибка при принятии заявки')
+			alert(error instanceof Error ? error.message : 'Ошибка при принятии заявки')
 		}
 	}
 
@@ -873,6 +754,7 @@ export function ProjectsFeed() {
 
 			alert('Заявка отклонена!')
 			setApplications(applications.filter(app => app.id !== application.id))
+			void refreshProjectMetadata()
 		} catch (error) {
 			console.error('Error rejecting application:', error)
 			alert('Ошибка при отклонении заявки')
@@ -1018,6 +900,10 @@ export function ProjectsFeed() {
 
 	const renderProjectButton = (project: Project) => {
 		const projectStatus = getProjectStatus(project)
+		const hasFreeRole = (project.required_roles || []).some(raw => {
+			const role = parseStoredRole(raw)
+			return Boolean(role.key.trim()) && role.taken < role.count
+		})
 		if (projectStatus !== 'recruiting' && user?.id !== project.owner_id) {
 			return (
 				<button
@@ -1030,9 +916,12 @@ export function ProjectsFeed() {
 		}
 
 		if (!user) {
+			if (!hasFreeRole) {
+				return <button disabled className='flex-1 bg-black/10 dark:bg-white/10 text-[var(--muted)] py-2 rounded-2xl font-bold cursor-not-allowed'>Свободных ролей нет</button>
+			}
 			return (
 				<button
-					onClick={() => handleApply(project.id)}
+					onClick={() => openRoleSelection(project)}
 					className='flex-1 bg-[var(--accent)] text-white py-2 rounded-2xl font-bold hover:opacity-90 transition flex items-center justify-center gap-2'
 				>
 					<UserPlus className='w-4 h-4' />
@@ -1078,10 +967,13 @@ export function ProjectsFeed() {
 				</button>
 			)
 		}
+		if (!hasFreeRole) {
+			return <button disabled className='flex-1 bg-black/10 dark:bg-white/10 text-[var(--muted)] py-2 rounded-2xl font-bold cursor-not-allowed'>Свободных ролей нет</button>
+		}
 
 		return (
 			<button
-				onClick={() => handleApply(project.id)}
+				onClick={() => openRoleSelection(project)}
 				className='flex-1 bg-[var(--accent)] text-white py-2 rounded-2xl font-bold hover:opacity-90 transition flex items-center justify-center gap-2'
 			>
 				<UserPlus className='w-4 h-4' />
@@ -1227,8 +1119,8 @@ export function ProjectsFeed() {
 											return (
 												<div key={idx} className='badge'>
 													<span>{role.label}</span>
-													<span className='badge__dot'>{role.filled}/1</span>
-													{role.filled === 1 ? (
+													<span className='badge__dot'>{role.taken}/{role.count}</span>
+													{role.taken >= role.count ? (
 														<span className='ml-1 text-orange-600 font-bold text-xs'>
 															Позиция закрыта
 														</span>
@@ -1694,14 +1586,14 @@ export function ProjectsFeed() {
 							{/* Required Roles */}
 							{selectedProject.required_roles &&
 								selectedProject.required_roles.length > 0 && (
-									<div>
+									<div ref={roleOptionsRef}>
 										<h3 className='text-lg font-bold text-[var(--text)] mb-3'>
 											Необходимые роли (нажмите, чтобы выбрать):
 										</h3>
 										<div className='flex flex-wrap gap-3'>
 											{selectedProject.required_roles.map((rawRole, idx) => {
-												const role = parseStoredRole(rawRole)
-												const isFull = role.filled === 1
+											const role = parseStoredRole(rawRole)
+											const isFull = role.taken >= role.count
 												const status = getUserProjectStatus(selectedProject)
 												const canApply =
 													status === 'can_apply' &&

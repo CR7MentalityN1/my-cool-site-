@@ -17,6 +17,14 @@ export function parseRoleSlot(raw: string): RoleSlot {
 	if (raw.trim().startsWith('{')) {
 		try {
 			const p = JSON.parse(raw) as Record<string, unknown>
+			if (typeof p.label === 'string') {
+				const total = typeof p.count === 'number' && Number.isFinite(p.count)
+					? Math.max(1, Math.floor(p.count)) : 1
+				const taken = typeof p.taken === 'number' && Number.isFinite(p.taken)
+					? Math.min(total, Math.max(0, Math.floor(p.taken))) : 0
+				return { key: p.label, label: p.label, faculty: null,
+					specialization: null, taken, total }
+			}
 			if (typeof p.faculty === 'string' && typeof p.specialization === 'string') {
 				const label = `${p.faculty} — ${p.specialization}`
 				const key = label
