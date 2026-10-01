@@ -22,6 +22,7 @@ import {
 	type Recommendation,
 } from '../../lib/recommendations'
 import { safeExternalUrl } from '../../lib/urls'
+import { getUserErrorMessage } from '../../lib/userErrors'
 
 const FACULTIES = [
 	'Прикладная математика',
@@ -490,13 +491,14 @@ export function ProjectsFeed() {
 
 			if (error) {
 				console.error('Error applying to project:', error)
-				alert('Ошибка при подаче заявки')
+				alert(getUserErrorMessage(error, 'Не удалось подать заявку. Попробуйте ещё раз.'))
 			} else {
 				alert('Заявка успешно подана!')
 				void refreshProjectMetadata()
 			}
 		} catch (error) {
 			console.error('Error:', error)
+			alert(getUserErrorMessage(error, 'Не удалось подать заявку. Попробуйте ещё раз.'))
 		}
 	}
 
@@ -579,7 +581,7 @@ export function ProjectsFeed() {
 
 			if (error) {
 				console.error('Error creating project:', error)
-				alert('Ошибка при создании проекта')
+				alert(getUserErrorMessage(error, 'Не удалось создать проект. Попробуйте ещё раз.'))
 			} else {
 				alert('Проект успешно создан!')
 				setCreateFormData({
@@ -593,7 +595,7 @@ export function ProjectsFeed() {
 			}
 		} catch (error) {
 			console.error('Error:', error)
-			alert('Ошибка при создании проекта')
+			alert(getUserErrorMessage(error, 'Не удалось создать проект. Попробуйте ещё раз.'))
 		} finally {
 			setIsSubmitting(false)
 		}
@@ -726,7 +728,7 @@ export function ProjectsFeed() {
 			void fetchProjects()
 		} catch (error) {
 			console.error('Error accepting application:', error)
-			alert(error instanceof Error ? error.message : 'Ошибка при принятии заявки')
+			alert(getUserErrorMessage(error, 'Не удалось принять заявку. Попробуйте ещё раз.'))
 		}
 	}
 
@@ -757,7 +759,7 @@ export function ProjectsFeed() {
 			void refreshProjectMetadata()
 		} catch (error) {
 			console.error('Error rejecting application:', error)
-			alert('Ошибка при отклонении заявки')
+			alert(getUserErrorMessage(error, 'Не удалось отклонить заявку. Попробуйте ещё раз.'))
 		}
 	}
 
@@ -786,7 +788,7 @@ export function ProjectsFeed() {
 			fetchProjects()
 		} catch (error) {
 			console.error('Error deleting project:', error)
-			alert('Ошибка при удалении проекта')
+			alert(getUserErrorMessage(error, 'Не удалось удалить проект. Попробуйте ещё раз.'))
 		}
 	}
 
@@ -833,7 +835,7 @@ export function ProjectsFeed() {
 			fetchProjects()
 		} catch (error) {
 			console.error('Error updating project:', error)
-			alert('Ошибка при обновлении проекта')
+			alert(getUserErrorMessage(error, 'Не удалось обновить проект. Попробуйте ещё раз.'))
 		}
 	}
 
@@ -1473,9 +1475,9 @@ export function ProjectsFeed() {
 										{recommendedParticipants.map(item => (
 											<div key={item.profile.id} className='rounded-2xl border border-[var(--border)] p-4 bg-black/5 dark:bg-white/5'>
 												<div className='flex items-start justify-between gap-2'>
-													<div>
-														<p className='font-bold text-[var(--text)]'>{item.profile.name || 'Без имени'}</p>
-														<p className='text-xs text-[var(--muted)]'>{item.profile.specialization || item.profile.faculty || 'Специализация не указана'}</p>
+											<div className='min-w-0'>
+												<p className='font-bold text-[var(--text)] break-words'>{item.profile.name || 'Без имени'}</p>
+												<p className='text-xs text-[var(--muted)] break-words'>{item.profile.specialization || item.profile.faculty || 'Специализация не указана'}</p>
 													</div>
 													<span className='badge text-[var(--accent)]'>{item.recommendation.score}%</span>
 												</div>

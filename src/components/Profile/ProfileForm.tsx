@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { User, Contact, FileText, Sparkles } from 'lucide-react'
 import { CompletedProjects } from './CompletedProjects'
+import { AvatarImage } from '../AvatarImage'
+import { safeAvatarUrl } from '../../lib/urls'
+import { getUserErrorMessage } from '../../lib/userErrors'
 
 const FACULTIES = [
 	'Прикладная математика',
@@ -60,7 +63,8 @@ const SPECIALIZATIONS: Record<string, string[]> = {
 export function ProfileForm() {
 	const { user, profile, loading: authLoading, refreshProfile } = useAuth()
 	const [loading, setLoading] = useState(false)
-	const [message, setMessage] = useState('')
+	const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+	const savingRef = useRef(false)
 	const [formData, setFormData] = useState({
 		name: '',
 		faculty: '',
@@ -89,30 +93,36 @@ export function ProfileForm() {
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault()
-		setLoading(true)
-		setMessage('')
+		if (savingRef.current) return
+		setFeedback(null)
 
 		if (!user) {
-			setMessage('Пользователь не авторизован')
-			setLoading(false)
+			setFeedback({ type: 'error', text: 'Пользователь не авторизован' })
+			return
+		}
+		const name = formData.name.trim()
+		const contacts = formData.contacts.trim()
+		const projectDescription = formData.project_description.trim()
+		const skills = formData.skills.trim()
+		const avatarUrl = formData.avatar_url.trim()
+		let validationError: string | null = null
+		if (!name) validationError = 'Укажите имя и фамилию'
+		else if (name.length > 80) validationError = 'Имя слишком длинное (макс. 80 символов)'
+		else if (contacts.length > 200) validationError = 'Контакты слишком длинные (макс. 200 символов)'
+		else if (projectDescription.length > 2000) validationError = 'Описание слишком длинное (макс. 2000 символов)'
+		else if (skills.length > 500) validationError = 'Список навыков слишком длинный (макс. 500 символов)'
+		else if (avatarUrl && !safeAvatarUrl(avatarUrl)) {
+			validationError = 'URL аватара должен начинаться с http:// или https://'
+		}
+		if (validationError) {
+			setFeedback({ type: 'error', text: validationError })
 			return
 		}
 
+		savingRef.current = true
+		setLoading(true)
 		try {
-			if (formData.name.trim().length > 80) {
-				throw new Error('Имя слишком длинное (макс. 80 символов)')
-			}
-			if (formData.contacts.trim().length > 200) {
-				throw new Error('Контакты слишком длинные (макс. 200 символов)')
-			}
-			if (formData.project_description.trim().length > 2000) {
-				throw new Error('Описание слишком длинное (макс. 2000 символов)')
-			}
-			if (formData.skills.length > 500) {
-				throw new Error('Список навыков слишком длинный')
-			}
-
-			const skillsArray = formData.skills
+			const skillsArray = skills
 				.split(',')
 				.map(s => s.trim())
 				.filter(s => s.length > 0)
@@ -121,14 +131,14 @@ export function ProfileForm() {
 				id: user.id,
 				auth_id: user.id,
 				email: user.email || '',
-				name: formData.name,
-				faculty: formData.faculty,
-				specialization: formData.specialization,
+				name,
+				faculty: formData.faculty.trim(),
+				specialization: formData.specialization.trim(),
 				course: formData.course,
 				skills: skillsArray,
-				project_description: formData.project_description,
-				contacts: formData.contacts,
-				avatar_url: formData.avatar_url,
+				project_description: projectDescription,
+				contacts,
+				avatar_url: avatarUrl,
 			})
 
 			if (error) {
@@ -137,10 +147,12 @@ export function ProfileForm() {
 			}
 
 			await refreshProfile()
-			setMessage('Профиль успешно обновлен!')
+			setFeedback({ type: 'success', text: 'Профиль успешно обновлён!' })
 		} catch (err) {
-			setMessage(err instanceof Error ? err.message : 'Ошибка при сохранении')
+			console.error('Ошибка сохранения профиля:', err)
+			setFeedback({ type: 'error', text: getUserErrorMessage(err, 'Не удалось сохранить профиль. Попробуйте ещё раз.') })
 		} finally {
+			savingRef.current = false
 			setLoading(false)
 		}
 	}
@@ -176,32 +188,29 @@ export function ProfileForm() {
 				Мой профиль
 			</h2>
 
-			{message && (
+			{feedback && (
 				<div
+					role={feedback.type === 'error' ? 'alert' : 'status'}
 					className={`mb-4 p-3 rounded ${
-						message.includes('успешно')
+						feedback.type === 'success'
 							? 'bg-green-100 border border-green-400 text-green-700'
 							: 'bg-red-100 border border-red-400 text-red-700'
 					}`}
 				>
-					{message}
+					{feedback.text}
 				</div>
 			)}
 
-			<form onSubmit={handleSubmit} className='space-y-6'>
+			<form
+				onSubmit={handleSubmit}
+				onChangeCapture={() => { if (feedback) setFeedback(null) }}
+				className='space-y-6'
+			>
 				<div className='flex items-center space-x-4 mb-6'>
-					<div className='w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden'>
-						{formData.avatar_url ? (
-							<img
-								src={formData.avatar_url}
-								alt='Avatar'
-								className='w-full h-full object-cover'
-							/>
-						) : (
-							<User className='w-12 h-12 text-gray-400' />
-						)}
+					<div className='w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden flex-shrink-0'>
+						<AvatarImage url={formData.avatar_url} alt='Avatar' iconClassName='w-12 h-12 text-gray-400' />
 					</div>
-					<div className='flex-1'>
+					<div className='flex-1 min-w-0'>
 						<label className='block text-sm font-medium text-gray-700 mb-1'>
 							URL аватара (можно использовать Gravatar, Imgur и т.д.)
 						</label>
@@ -221,10 +230,11 @@ export function ProfileForm() {
 					<label className='block text-sm font-medium text-gray-700 mb-1'>
 						Имя и фамилия *
 					</label>
-					<input
-						type='text'
-						value={formData.name}
-						onChange={e => setFormData({ ...formData, name: e.target.value })}
+						<input
+							type='text'
+							value={formData.name}
+							onChange={e => setFormData({ ...formData, name: e.target.value })}
+							maxLength={80}
 						required
 						className='w-full px-4 py-2 border border-[var(--border)] bg-[var(--card)] text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 						placeholder='Иван Иванов'
@@ -317,6 +327,7 @@ export function ProfileForm() {
 						type='text'
 						value={formData.skills}
 						onChange={e => setFormData({ ...formData, skills: e.target.value })}
+						maxLength={500}
 						className='w-full px-4 py-2 border border-[var(--border)] bg-[var(--card)] text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 						placeholder='React, Python, UI/UX Design'
 					/>
@@ -335,6 +346,7 @@ export function ProfileForm() {
 							setFormData({ ...formData, project_description: e.target.value })
 						}
 						rows={4}
+						maxLength={2000}
 						className='w-full px-4 py-2 border border-[var(--border)] bg-[var(--card)] text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 						placeholder='Расскажите, над каким проектом хотите работать...'
 					/>
@@ -353,6 +365,7 @@ export function ProfileForm() {
 						onChange={e =>
 							setFormData({ ...formData, contacts: e.target.value })
 						}
+						maxLength={200}
 						className='w-full px-4 py-2 border border-[var(--border)] bg-[var(--card)] text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 						placeholder='@telegram или email@example.com'
 					/>

@@ -1,5 +1,5 @@
-import { User } from 'lucide-react'
 import type { Database } from '../../lib/database.types'
+import { AvatarImage } from '../AvatarImage'
 
 type Profile = Database['public']['Tables']['profiles']['Row']
 
@@ -10,25 +10,17 @@ interface StudentCardProps {
 
 export function StudentCard({ profile, onViewDetails }: StudentCardProps) {
 	return (
-		<div className='card glass card-hover p-6'>
-			<div className='flex flex-col items-center'>
+		<div className='card glass card-hover p-6 min-w-0'>
+			<div className='flex flex-col items-center min-w-0'>
 				<div className='w-20 h-20 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center overflow-hidden mb-4'>
-					{profile.avatar_url ? (
-						<img
-							src={profile.avatar_url}
-							alt={profile.name || 'Student'}
-							className='w-full h-full object-cover'
-						/>
-					) : (
-						<User className='w-10 h-10 text-[var(--muted)]' />
-					)}
+					<AvatarImage url={profile.avatar_url} alt={profile.name || 'Student'} iconClassName='w-10 h-10 text-[var(--muted)]' />
 				</div>
 
-				<h3 className='text-xl font-semibold text-[var(--text)] mb-1 text-center'>
+				<h3 className='text-xl font-semibold text-[var(--text)] mb-1 text-center w-full break-words'>
 					{profile.name || 'Без имени'}
 				</h3>
 
-				<p className='text-sm text-[var(--muted)] mb-1'>
+				<p className='text-sm text-[var(--muted)] mb-1 text-center w-full break-words'>
 					{profile.faculty ? (
 						profile.specialization ? (
 							<>
@@ -51,7 +43,7 @@ export function StudentCard({ profile, onViewDetails }: StudentCardProps) {
 				{profile.skills && profile.skills.length > 0 && (
 					<div className='flex flex-wrap gap-2 justify-center mb-4'>
 						{profile.skills.slice(0, 3).map((skill, index) => (
-							<span key={index} className='badge'>
+							<span key={index} className='badge max-w-full break-all'>
 								{skill}
 							</span>
 						))}

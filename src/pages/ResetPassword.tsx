@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { initialRecoveryRedirect, supabase } from '../lib/supabase'
+import { getUserErrorMessage, UserFacingError } from '../lib/userErrors'
 
 type RecoveryState = 'checking' | 'ready' | 'invalid' | 'success'
 
@@ -61,13 +62,13 @@ export function ResetPassword() {
 			try {
 				if (initialRecoveryRedirect.redirectError || initialRecoveryRedirect.errorCode || initialRecoveryRedirect.errorDescription) {
 					sessionStorage.removeItem(RECOVERY_MARKER)
-					throw new Error(recoveryErrorMessage(
+					throw new UserFacingError(recoveryErrorMessage(
 						initialRecoveryRedirect.errorCode || initialRecoveryRedirect.redirectError,
 						initialRecoveryRedirect.errorDescription,
 					))
 				}
 				if (initialRecoveryRedirect.implicitRecovery && !initialRecoveryRedirect.hasImplicitTokens) {
-					throw new Error(recoveryErrorMessage('invalid_link'))
+					throw new UserFacingError(recoveryErrorMessage('invalid_link'))
 				}
 
 				// initialize() is idempotent in the installed SDK and waits for its
@@ -85,14 +86,14 @@ export function ResetPassword() {
 						initialRecoveryRedirect.code,
 					)
 					const { error: exchangeError } = await pendingCodeExchange
-					if (exchangeError) throw new Error(recoveryErrorMessage('invalid_link'))
+					if (exchangeError) throw new UserFacingError(recoveryErrorMessage('invalid_link'))
 					exchangedCodeManually = true
 					const url = new URL(window.location.href)
 					url.searchParams.delete('code')
 					window.history.replaceState(window.history.state, '', url.toString())
 				}
 				if (initializationError && !exchangedCodeManually) {
-					throw new Error(recoveryErrorMessage('invalid_link'))
+					throw new UserFacingError(recoveryErrorMessage('invalid_link'))
 				}
 
 				const { data: { session }, error: sessionError } = await supabase.auth.getSession()
@@ -104,7 +105,7 @@ export function ResetPassword() {
 					sessionStorage.getItem(RECOVERY_MARKER) === session?.user.id
 
 				if (!session || !knownRecovery) {
-					throw new Error(recoveryErrorMessage(null))
+					throw new UserFacingError(recoveryErrorMessage(null))
 				}
 
 				sessionStorage.setItem(RECOVERY_MARKER, session.user.id)
@@ -114,7 +115,8 @@ export function ResetPassword() {
 				}
 			} catch (err) {
 				if (active) {
-					setError(err instanceof Error ? err.message : recoveryErrorMessage('invalid_link'))
+					console.error('Ошибка проверки ссылки восстановления:', err)
+					setError(getUserErrorMessage(err, recoveryErrorMessage('invalid_link')))
 					setState('invalid')
 				}
 			}
@@ -150,7 +152,7 @@ export function ResetPassword() {
 				if (updateError.status === 401 || updateError.status === 403) {
 					sessionStorage.removeItem(RECOVERY_MARKER)
 					setState('invalid')
-					throw new Error(recoveryErrorMessage('expired_token'))
+					throw new UserFacingError(recoveryErrorMessage('expired_token'))
 				}
 				throw updateError
 			}
@@ -160,7 +162,8 @@ export function ResetPassword() {
 			sessionStorage.removeItem(RECOVERY_MARKER)
 			await finishSignOut()
 		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Ошибка обновления пароля')
+			console.error('Ошибка обновления пароля:', err)
+			setError(getUserErrorMessage(err, 'Не удалось обновить пароль. Попробуйте ещё раз.'))
 		} finally {
 			setLoading(false)
 		}

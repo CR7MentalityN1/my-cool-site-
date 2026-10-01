@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { getUserErrorMessage } from '../../lib/userErrors'
 
 interface ResetPasswordFormProps {
 	onDone: () => void
@@ -33,7 +34,8 @@ export function ResetPasswordForm({ onDone }: ResetPasswordFormProps) {
 			setMessage('Пароль обновлён. Теперь можно войти.')
 			setTimeout(onDone, 800)
 		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Ошибка обновления пароля')
+			console.error('Ошибка обновления пароля:', err)
+			setError(getUserErrorMessage(err, 'Не удалось обновить пароль. Попробуйте ещё раз.'))
 		} finally {
 			setLoading(false)
 		}
@@ -96,4 +98,3 @@ export function ResetPasswordForm({ onDone }: ResetPasswordFormProps) {
 		</div>
 	)
 }
-

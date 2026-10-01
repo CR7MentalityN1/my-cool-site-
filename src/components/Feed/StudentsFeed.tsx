@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
+import { getUserErrorMessage } from '../../lib/userErrors'
 import { StudentCard } from './StudentCard'
 import { StudentModal } from './StudentModal'
 import { Search } from 'lucide-react'
@@ -53,7 +54,7 @@ export function StudentsFeed() {
 			setProfiles(data || [])
 		} catch (error) {
 			console.error('Error fetching profiles:', error)
-			alert('Не удалось загрузить студентов')
+			alert(getUserErrorMessage(error, 'Не удалось загрузить студентов'))
 		} finally {
 			setLoading(false)
 		}

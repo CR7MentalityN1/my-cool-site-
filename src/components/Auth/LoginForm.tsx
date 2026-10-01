@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { getUserErrorMessage } from '../../lib/userErrors'
 
 interface LoginFormProps {
 	onSwitchToRegister: () => void
@@ -21,7 +22,8 @@ export function LoginForm({ onSwitchToRegister, onForgotPassword }: LoginFormPro
 		try {
 			await signIn(email, password)
 		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Не удалось войти')
+			console.error('Ошибка входа:', err)
+			setError(getUserErrorMessage(err, 'Не удалось войти. Попробуйте ещё раз.'))
 		} finally {
 			setLoading(false)
 		}

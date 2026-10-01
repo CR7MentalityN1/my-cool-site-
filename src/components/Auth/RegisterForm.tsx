@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { getUserErrorMessage, UserFacingError } from '../../lib/userErrors'
 
 interface RegisterFormProps {
 	onSwitchToLogin: () => void
@@ -40,21 +41,16 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
 			setConfirmPassword('')
 			setError('')
 		} catch (err) {
-			const errorMessage =
-				err instanceof Error ? err.message : 'Не удалось зарегистрироваться'
-
-			// Если это сообщение про отправку письма или подтверждение email - показываем как успех
-			if (
-				errorMessage.includes('Письмо отправлено') ||
-				errorMessage.includes('подтвердите')
-			) {
-				setSuccessMessage(errorMessage)
+			// A confirmation-required result is intentionally treated as success.
+			if (err instanceof UserFacingError) {
+				setSuccessMessage(getUserErrorMessage(err))
 				setEmail('')
 				setPassword('')
 				setConfirmPassword('')
 				setError('')
 			} else {
-				setError(errorMessage)
+				console.error('Ошибка регистрации:', err)
+				setError(getUserErrorMessage(err, 'Не удалось зарегистрироваться. Попробуйте ещё раз.'))
 				setSuccessMessage('')
 			}
 		} finally {

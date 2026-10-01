@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { UserFacingError } from '../lib/userErrors'
 import type { Database } from '../lib/database.types'
 
 type Profile = Database['public']['Tables']['profiles']['Row']
@@ -83,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				error.message?.includes('Email confirmation') ||
 				error.message?.includes('confirmation required')
 			) {
-				throw new Error(
+				throw new UserFacingError(
 					'Письмо отправлено! Пожалуйста, подтвердите почту, чтобы войти в Платформу междисциплинарных проектов.',
 				)
 			}
@@ -109,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 			// Проверяем, требуется ли подтверждение email
 			if (!data.user.confirmed_at) {
-				throw new Error(
+				throw new UserFacingError(
 					'Письмо отправлено! Пожалуйста, подтвердите почту, чтобы войти в Платформу междисциплинарных проектов.',
 				)
 			}

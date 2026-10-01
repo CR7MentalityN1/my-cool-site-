@@ -1,6 +1,7 @@
-import { X, User, Mail } from 'lucide-react'
+import { X, Mail } from 'lucide-react'
 import type { Database } from '../../lib/database.types'
 import { CompletedProjects } from '../Profile/CompletedProjects'
+import { AvatarImage } from '../AvatarImage'
 
 type Profile = Database['public']['Tables']['profiles']['Row']
 
@@ -26,22 +27,14 @@ export function StudentModal({ profile, onClose }: StudentModalProps) {
 				<div className='p-6'>
 					<div className='flex items-center space-x-6 mb-6'>
 						<div className='w-24 h-24 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center overflow-hidden flex-shrink-0'>
-							{profile.avatar_url ? (
-								<img
-									src={profile.avatar_url}
-									alt={profile.name || 'Student'}
-									className='w-full h-full object-cover'
-								/>
-							) : (
-								<User className='w-12 h-12 text-[var(--muted)]' />
-							)}
+							<AvatarImage url={profile.avatar_url} alt={profile.name || 'Student'} iconClassName='w-12 h-12 text-[var(--muted)]' />
 						</div>
 
-						<div>
-							<h3 className='text-2xl font-bold text-[var(--text)] mb-2'>
+						<div className='min-w-0'>
+							<h3 className='text-2xl font-bold text-[var(--text)] mb-2 break-words'>
 								{profile.name || 'Без имени'}
 							</h3>
-							<p className='text-[var(--muted)]'>
+							<p className='text-[var(--muted)] break-words'>
 								{profile.faculty ? (
 									profile.specialization ? (
 										<>
@@ -70,7 +63,7 @@ export function StudentModal({ profile, onClose }: StudentModalProps) {
 							</h4>
 							<div className='flex flex-wrap gap-2'>
 								{profile.skills.map((skill, index) => (
-									<span key={index} className='badge' style={{ fontSize: 14 }}>
+									<span key={index} className='badge max-w-full break-all' style={{ fontSize: 14 }}>
 										{skill}
 									</span>
 								))}
@@ -83,7 +76,7 @@ export function StudentModal({ profile, onClose }: StudentModalProps) {
 							<h4 className='text-lg font-semibold text-[var(--text)] mb-3'>
 								Описание проекта
 							</h4>
-							<p className='text-[var(--text)]/90 leading-relaxed whitespace-pre-wrap'>
+							<p className='text-[var(--text)]/90 leading-relaxed whitespace-pre-wrap break-words'>
 								{profile.project_description}
 							</p>
 						</div>
@@ -95,7 +88,7 @@ export function StudentModal({ profile, onClose }: StudentModalProps) {
 								<Mail className='w-5 h-5 mr-2' />
 								Контакты
 							</h4>
-							<p className='text-[var(--text)]/90'>{profile.contacts}</p>
+							<p className='text-[var(--text)]/90 break-all'>{profile.contacts}</p>
 						</div>
 					)}
 

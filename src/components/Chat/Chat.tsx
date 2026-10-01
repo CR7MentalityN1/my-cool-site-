@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import { Send, User } from 'lucide-react'
+import { Send } from 'lucide-react'
 import type { Database } from '../../lib/database.types'
+import { AvatarImage } from '../AvatarImage'
+import { getUserErrorMessage } from '../../lib/userErrors'
 
 type Message = Database['public']['Tables']['messages']['Row'] & {
 	profiles?: {
@@ -61,7 +63,7 @@ export function Chat() {
 			} catch (error) {
 				if (!active) return
 				console.error('Error fetching messages:', error)
-				alert('Не удалось загрузить сообщения')
+				alert(getUserErrorMessage(error, 'Не удалось загрузить сообщения'))
 			}
 		}
 
@@ -159,7 +161,7 @@ export function Chat() {
 			setNewMessage('')
 		} catch (error) {
 			console.error('Error sending message:', error)
-			setSendError('Не удалось отправить сообщение. Попробуйте ещё раз.')
+			setSendError(getUserErrorMessage(error, 'Не удалось отправить сообщение. Попробуйте ещё раз.'))
 		} finally {
 			sendingRef.current = false
 			setLoading(false)
@@ -196,26 +198,18 @@ export function Chat() {
 								className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
 							>
 								<div
-									className={`flex items-start space-x-2 max-w-[70%] ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}
+								className={`flex items-start space-x-2 max-w-[70%] min-w-0 ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}
 								>
 									<div className='w-8 h-8 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center overflow-hidden flex-shrink-0'>
-										{message.profiles?.avatar_url ? (
-											<img
-												src={message.profiles.avatar_url}
-												alt={message.profiles.name || 'User'}
-												className='w-full h-full object-cover'
-											/>
-										) : (
-											<User className='w-4 h-4 text-[var(--muted)]' />
-										)}
+										<AvatarImage url={message.profiles?.avatar_url} alt={message.profiles?.name || 'User'} iconClassName='w-4 h-4 text-[var(--muted)]' />
 									</div>
 
-									<div>
+									<div className='min-w-0'>
 										<div className='flex items-center space-x-2 mb-1'>
-											<span className='text-sm font-semibold text-[var(--text)]'>
+											<span className='text-sm font-semibold text-[var(--text)] break-all'>
 												{message.profiles?.name || 'Без имени'}
 											</span>
-											<span className='text-xs text-[var(--muted)]'>
+											<span className='text-xs text-[var(--muted)] flex-shrink-0'>
 												{formatTime(message.created_at)}
 											</span>
 										</div>

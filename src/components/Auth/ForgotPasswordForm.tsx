@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
+import { getUserErrorMessage } from '../../lib/userErrors'
 
 interface ForgotPasswordFormProps {
 	onBackToLogin: () => void
@@ -22,7 +23,8 @@ export function ForgotPasswordForm({ onBackToLogin }: ForgotPasswordFormProps) {
 			await resetPasswordForEmail(email.trim())
 			setMessage('Письмо для сброса пароля отправлено. Проверьте почту.')
 		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Ошибка отправки письма')
+			console.error('Ошибка отправки письма:', err)
+			setError(getUserErrorMessage(err, 'Не удалось отправить письмо. Попробуйте позже.'))
 		} finally {
 			setLoading(false)
 		}
@@ -84,4 +86,3 @@ export function ForgotPasswordForm({ onBackToLogin }: ForgotPasswordFormProps) {
 		</div>
 	)
 }
-
