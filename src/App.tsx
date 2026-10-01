@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from './contexts/AuthContext'
-import { supabase } from './lib/supabase'
+import { initialRecoveryRedirect } from './lib/supabase'
 import { Landing } from './components/Layout/Landing'
 import { Header } from './components/Layout/Header'
 import type { AppPage } from './components/Layout/Header'
 import { LoginForm } from './components/Auth/LoginForm'
 import { RegisterForm } from './components/Auth/RegisterForm'
 import { ForgotPasswordForm } from './components/Auth/ForgotPasswordForm'
-import { ResetPasswordForm } from './components/Auth/ResetPasswordForm'
 import { ResetPassword } from './pages/ResetPassword'
 import { ProfileForm } from './components/Profile/ProfileForm'
 import { StudentsFeed } from './components/Feed/StudentsFeed'
@@ -16,16 +15,10 @@ import { ProjectsFeed } from './components/Projects/ProjectsFeed'
 
 function App() {
 	const { user, loading } = useAuth()
-	const [authMode, setAuthMode] = useState<
-		'login' | 'register' | 'forgot' | 'reset'
-	>('login')
+	const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>(
+		'login',
+	)
 	const [currentPage, setCurrentPage] = useState<AppPage>('landing')
-
-	useEffect(() => {
-		// keep legacy behavior for in-app reset form
-		const hash = window.location.hash || ''
-		if (hash.includes('type=recovery')) setAuthMode('reset')
-	}, [])
 
 	useEffect(() => {
 		if (user && currentPage === 'landing') {
@@ -33,20 +26,14 @@ function App() {
 		}
 	}, [user, currentPage])
 
-	useEffect(() => {
-		const {
-			data: { subscription },
-		} = supabase.auth.onAuthStateChange(event => {
-			if (event === 'PASSWORD_RECOVERY') {
-				// Ensure user sees password reset UI
-				window.history.replaceState({}, '', '/reset-password')
-				setAuthMode('reset')
-				setCurrentPage('feed')
-			}
-		})
-
-		return () => subscription.unsubscribe()
-	}, [])
+	// The recovery page must mount while Auth is still initializing so it can
+	// observe the redirect event. A reset link that lands on / also works.
+	if (
+		window.location.pathname === '/reset-password' ||
+		initialRecoveryRedirect.hasRecoveryLink
+	) {
+		return <ResetPassword />
+	}
 
 	if (loading) {
 		return (
@@ -56,20 +43,8 @@ function App() {
 		)
 	}
 
-	// Dedicated reset-password route (Supabase redirect target)
-	if (window.location.pathname === '/reset-password') {
-		return (
-			<ResetPassword
-				onGoToLogin={() => {
-					setAuthMode('login')
-					setCurrentPage('feed')
-				}}
-			/>
-		)
-	}
-
 	if (!user) {
-		if (currentPage === 'landing') {
+		if (currentPage === 'landing' && window.location.pathname !== '/login') {
 			return (
 				<Landing
 					onGetStarted={() => {
@@ -97,9 +72,6 @@ function App() {
 				)}
 				{authMode === 'forgot' && (
 					<ForgotPasswordForm onBackToLogin={() => setAuthMode('login')} />
-				)}
-				{authMode === 'reset' && (
-					<ResetPasswordForm onDone={() => setAuthMode('login')} />
 				)}
 			</div>
 		)

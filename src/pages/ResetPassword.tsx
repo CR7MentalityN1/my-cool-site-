@@ -1,33 +1,130 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { initialRecoveryRedirect, supabase } from '../lib/supabase'
 
-interface ResetPasswordProps {
-	onGoToLogin: () => void
+type RecoveryState = 'checking' | 'ready' | 'invalid' | 'success'
+
+const RECOVERY_MARKER = 'password-recovery-user'
+
+function recoveryErrorMessage(code: string | null, description?: string | null) {
+	if (code === 'otp_expired' || code === 'expired_token') {
+		return 'Срок действия ссылки истёк или она уже была использована. Запросите новое письмо для сброса пароля.'
+	}
+	if (code || description) {
+		return 'Ссылка для восстановления недействительна или уже использована. Запросите новое письмо.'
+	}
+	return 'Сессия восстановления не найдена. Откройте актуальную ссылку из письма или запросите новое письмо.'
 }
 
-export function ResetPassword({ onGoToLogin }: ResetPasswordProps) {
-	const [canReset, setCanReset] = useState(false)
+// StrictMode remounts effects in development. Share a pending exchange so a
+// single-use PKCE code is never submitted twice.
+let pendingCodeExchange: ReturnType<typeof supabase.auth.exchangeCodeForSession> | null = null
+
+export function ResetPassword() {
+	const [state, setState] = useState<RecoveryState>('checking')
 	const [password, setPassword] = useState('')
 	const [password2, setPassword2] = useState('')
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState('')
 	const [message, setMessage] = useState('')
 
-	useEffect(() => {
-		const {
-			data: { subscription },
-		} = supabase.auth.onAuthStateChange(event => {
-			if (event === 'PASSWORD_RECOVERY') {
-				setCanReset(true)
-			}
-		})
+	const finishSignOut = async () => {
+		try {
+			const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' })
+			if (signOutError) throw signOutError
+			setError('')
+			window.setTimeout(() => window.location.replace('/login'), 1200)
+		} catch {
+			setError('Пароль изменён, но автоматический выход не удался. Повторите выход.')
+		}
+	}
 
-		// Fallback: direct link with hash params
-		if ((window.location.hash || '').includes('type=recovery')) {
-			setCanReset(true)
+	useEffect(() => {
+		let active = true
+		let recoveryEventReceived = false
+		const { data: { subscription } } = supabase.auth.onAuthStateChange(
+			(event, session) => {
+				if (event === 'SIGNED_OUT') {
+					sessionStorage.removeItem(RECOVERY_MARKER)
+				}
+				if (event === 'PASSWORD_RECOVERY' && session) {
+					recoveryEventReceived = true
+					sessionStorage.setItem(RECOVERY_MARKER, session.user.id)
+					if (active) {
+						setError('')
+						setState('ready')
+					}
+				}
+			},
+		)
+
+		const checkRecoverySession = async () => {
+			try {
+				if (initialRecoveryRedirect.redirectError || initialRecoveryRedirect.errorCode || initialRecoveryRedirect.errorDescription) {
+					sessionStorage.removeItem(RECOVERY_MARKER)
+					throw new Error(recoveryErrorMessage(
+						initialRecoveryRedirect.errorCode || initialRecoveryRedirect.redirectError,
+						initialRecoveryRedirect.errorDescription,
+					))
+				}
+				if (initialRecoveryRedirect.implicitRecovery && !initialRecoveryRedirect.hasImplicitTokens) {
+					throw new Error(recoveryErrorMessage('invalid_link'))
+				}
+
+				// initialize() is idempotent in the installed SDK and waits for its
+				// automatic implicit or PKCE redirect processing to complete.
+				const { error: initializationError } = await supabase.auth.initialize()
+				let exchangedCodeManually = false
+
+				if (
+					initialRecoveryRedirect.code &&
+					new URL(window.location.href).searchParams.get('code') === initialRecoveryRedirect.code
+				) {
+					// The default browser client uses implicit flow. If a PKCE code
+					// remains in the URL, the SDK has not exchanged it automatically.
+					pendingCodeExchange ??= supabase.auth.exchangeCodeForSession(
+						initialRecoveryRedirect.code,
+					)
+					const { error: exchangeError } = await pendingCodeExchange
+					if (exchangeError) throw new Error(recoveryErrorMessage('invalid_link'))
+					exchangedCodeManually = true
+					const url = new URL(window.location.href)
+					url.searchParams.delete('code')
+					window.history.replaceState(window.history.state, '', url.toString())
+				}
+				if (initializationError && !exchangedCodeManually) {
+					throw new Error(recoveryErrorMessage('invalid_link'))
+				}
+
+				const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+				if (sessionError) throw sessionError
+
+				const knownRecovery =
+					recoveryEventReceived ||
+					initialRecoveryRedirect.hasRecoveryLink ||
+					sessionStorage.getItem(RECOVERY_MARKER) === session?.user.id
+
+				if (!session || !knownRecovery) {
+					throw new Error(recoveryErrorMessage(null))
+				}
+
+				sessionStorage.setItem(RECOVERY_MARKER, session.user.id)
+				if (active) {
+					setError('')
+					setState('ready')
+				}
+			} catch (err) {
+				if (active) {
+					setError(err instanceof Error ? err.message : recoveryErrorMessage('invalid_link'))
+					setState('invalid')
+				}
+			}
 		}
 
-		return () => subscription.unsubscribe()
+		checkRecoverySession()
+		return () => {
+			active = false
+			subscription.unsubscribe()
+		}
 	}, [])
 
 	const handleSubmit = async (e: React.FormEvent) => {
@@ -49,13 +146,19 @@ export function ResetPassword({ onGoToLogin }: ResetPasswordProps) {
 			const { error: updateError } = await supabase.auth.updateUser({
 				password,
 			})
-			if (updateError) throw updateError
+			if (updateError) {
+				if (updateError.status === 401 || updateError.status === 403) {
+					sessionStorage.removeItem(RECOVERY_MARKER)
+					setState('invalid')
+					throw new Error(recoveryErrorMessage('expired_token'))
+				}
+				throw updateError
+			}
 
-			setMessage('Пароль успешно изменен!')
-			setTimeout(() => {
-				window.history.replaceState({}, '', '/')
-				onGoToLogin()
-			}, 3000)
+			setMessage('Пароль успешно изменён')
+			setState('success')
+			sessionStorage.removeItem(RECOVERY_MARKER)
+			await finishSignOut()
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Ошибка обновления пароля')
 		} finally {
@@ -84,39 +187,44 @@ export function ResetPassword({ onGoToLogin }: ResetPasswordProps) {
 					</div>
 				)}
 
-				{!canReset ? (
-					<div className='rounded-2xl border border-[var(--border)] bg-black/5 dark:bg-white/5 p-4 text-[var(--muted)]'>
-						Откройте ссылку из письма для восстановления пароля — после этого появится
-						форма смены пароля.
-					</div>
-				) : (
+				{state === 'checking' && (
+					<p className='text-[var(--muted)]'>Проверяем ссылку для восстановления...</p>
+				)}
+				{state === 'invalid' && (
+					<a href='/login' className='text-[var(--accent)] font-semibold hover:underline'>
+						Вернуться ко входу
+					</a>
+				)}
+				{state === 'ready' && (
 					<form onSubmit={handleSubmit} className='space-y-4'>
 						<div>
-							<label className='block text-sm font-medium text-[var(--muted)] mb-1'>
+							<label htmlFor='new-password' className='block text-sm font-medium text-[var(--muted)] mb-1'>
 								Новый пароль
 							</label>
 							<input
+								id='new-password'
 								type='password'
 								value={password}
 								onChange={e => setPassword(e.target.value)}
+								autoComplete='new-password'
 								required
 								className='w-full px-4 py-2 border border-[var(--border)] bg-[var(--card)]/70 text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition'
 							/>
 						</div>
-
 						<div>
-							<label className='block text-sm font-medium text-[var(--muted)] mb-1'>
-								Подтвердите пароль
+							<label htmlFor='confirm-password' className='block text-sm font-medium text-[var(--muted)] mb-1'>
+								Повторите новый пароль
 							</label>
 							<input
+								id='confirm-password'
 								type='password'
 								value={password2}
 								onChange={e => setPassword2(e.target.value)}
+								autoComplete='new-password'
 								required
 								className='w-full px-4 py-2 border border-[var(--border)] bg-[var(--card)]/70 text-[var(--text)] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition'
 							/>
 						</div>
-
 						<button
 							type='submit'
 							disabled={loading}
@@ -126,8 +234,18 @@ export function ResetPassword({ onGoToLogin }: ResetPasswordProps) {
 						</button>
 					</form>
 				)}
+				{state === 'success' && (
+					<div>
+						{error ? (
+							<button type='button' onClick={finishSignOut} className='text-[var(--accent)] font-semibold hover:underline'>
+								Повторить выход
+							</button>
+						) : (
+							<p className='text-[var(--muted)]'>Переходим на страницу входа...</p>
+						)}
+					</div>
+				)}
 			</div>
 		</div>
 	)
 }
-
