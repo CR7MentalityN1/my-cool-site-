@@ -6,19 +6,22 @@ import {
 	FolderKanban,
 	Moon,
 	Sun,
+	CalendarDays,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
+import { NotificationsBell } from './NotificationsBell'
 
-export type AppPage = 'landing' | 'feed' | 'profile' | 'chat' | 'projects'
+export type AppPage = 'landing' | 'feed' | 'profile' | 'chat' | 'projects' | 'calendar'
 
 interface HeaderProps {
 	currentPage: AppPage
 	onNavigate: (page: AppPage) => void
+	onOpenProject: (projectId: string) => void
 }
 
-export function Header({ currentPage, onNavigate }: HeaderProps) {
-	const { signOut } = useAuth()
+export function Header({ currentPage, onNavigate, onOpenProject }: HeaderProps) {
+	const { user, signOut } = useAuth()
 	const { theme, toggleTheme } = useTheme()
 
 	const handleLogout = async () => {
@@ -40,7 +43,8 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 						Платформа междисциплинарных проектов
 					</button>
 
-					<nav className='flex w-full lg:w-auto items-center gap-2 overflow-x-auto pb-1 lg:pb-0'>
+					<div className='flex w-full lg:w-auto min-w-0 items-center gap-2'>
+					<nav className='flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1 lg:pb-0'>
 						<button
 							type='button'
 							onClick={toggleTheme}
@@ -79,6 +83,18 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 						</button>
 
 						<button
+							onClick={() => onNavigate('calendar')}
+							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
+								currentPage === 'calendar'
+									? 'bg-[var(--accent)] text-white'
+									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
+							}`}
+						>
+							<CalendarDays className='w-5 h-5' />
+							<span className='font-medium'>Календарь</span>
+						</button>
+
+						<button
 							onClick={() => onNavigate('chat')}
 							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
 								currentPage === 'chat'
@@ -110,6 +126,8 @@ export function Header({ currentPage, onNavigate }: HeaderProps) {
 							<span className='font-medium'>Выйти</span>
 						</button>
 					</nav>
+					<NotificationsBell key={user?.id} onOpenProject={onOpenProject} />
+					</div>
 				</div>
 			</div>
 		</header>

@@ -23,6 +23,8 @@ import {
 } from '../../lib/recommendations'
 import { safeExternalUrl } from '../../lib/urls'
 import { getUserErrorMessage } from '../../lib/userErrors'
+import ProjectActivity from './ProjectActivity'
+import { ProjectTasks } from './ProjectTasks'
 
 const FACULTIES = [
 	'Прикладная математика',
@@ -242,7 +244,7 @@ const PROJECT_STATUS_LABELS = {
 
 const getProjectStatus = (project: Project) => project.status || 'recruiting'
 
-export function ProjectsFeed() {
+export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen: string | null; onProjectOpened: () => void }) {
 	const { user, profile } = useAuth()
 	const [projects, setProjects] = useState<Project[]>([])
 	const [loading, setLoading] = useState(true)
@@ -274,6 +276,8 @@ export function ProjectsFeed() {
 		Record<string, UserProjectStatus>
 	>({})
 	const [memberProjectIds, setMemberProjectIds] = useState<Set<string>>(new Set())
+	const [activityVersion, setActivityVersion] = useState(0)
+	const refreshActivity = useCallback(() => setActivityVersion(version => version + 1), [])
 	const [roleApplicationCounts, setRoleApplicationCounts] = useState<
 		Record<string, RoleApplicationCount>
 	>({})
@@ -326,6 +330,35 @@ export function ProjectsFeed() {
 		}
 		setLoading(false)
 	}
+
+	useEffect(() => {
+		if (!projectToOpen || loading) return
+		let cancelled = false
+		const openNotifiedProject = async () => {
+			let project = projects.find(item => item.id === projectToOpen)
+			if (!project) {
+				const { data, error } = await supabase.from('projects')
+					.select('*').eq('id', projectToOpen).maybeSingle()
+				if (error) console.error('Error opening notified project:', error)
+				if (data) {
+					const { data: owner } = await supabase.from('profiles')
+						.select('name').eq('auth_id', data.owner_id).maybeSingle()
+					project = { ...data, profiles: { full_name: owner?.name || null } }
+				}
+			}
+			if (cancelled) return
+			if (project) {
+				setSelectedProject(project)
+				setIsAdminModalOpen(false)
+				setIsViewModalOpen(true)
+			} else {
+				alert('Проект не найден или недоступен.')
+			}
+			onProjectOpened()
+		}
+		void openNotifiedProject()
+		return () => { cancelled = true }
+	}, [projectToOpen, projects, loading, onProjectOpened])
 
 	const refreshProjectMetadata = useCallback(async () => {
 		if (!user || projects.length === 0) {
@@ -723,6 +756,7 @@ export function ProjectsFeed() {
 
 			// Update selected project
 			setSelectedProject({ ...updatedProject, profiles: selectedProject.profiles })
+			setActivityVersion(version => version + 1)
 
 			// Refresh projects and statuses
 			void fetchProjects()
@@ -757,6 +791,7 @@ export function ProjectsFeed() {
 			alert('Заявка отклонена!')
 			setApplications(applications.filter(app => app.id !== application.id))
 			void refreshProjectMetadata()
+			setActivityVersion(version => version + 1)
 		} catch (error) {
 			console.error('Error rejecting application:', error)
 			alert(getUserErrorMessage(error, 'Не удалось отклонить заявку. Попробуйте ещё раз.'))
@@ -832,6 +867,7 @@ export function ProjectsFeed() {
 						? selectedProject.completed_at || new Date().toISOString()
 						: null,
 			})
+			setActivityVersion(version => version + 1)
 			fetchProjects()
 		} catch (error) {
 			console.error('Error updating project:', error)
@@ -1494,6 +1530,9 @@ export function ProjectsFeed() {
 								)}
 							</div>
 
+							<ProjectTasks key={selectedProject.id} projectId={selectedProject.id} ownerId={selectedProject.owner_id} refreshKey={activityVersion} onChanged={refreshActivity} />
+							<ProjectActivity key={selectedProject.id} projectId={selectedProject.id} refreshKey={activityVersion} />
+
 							{/* Delete Project */}
 							<div className='border-t pt-6'>
 								<button
@@ -1657,6 +1696,13 @@ export function ProjectsFeed() {
 									<p className='text-[var(--muted)]'>Пока нет участников</p>
 								)}
 							</div>
+
+							{user && (user.id === selectedProject.owner_id || memberProjectIds.has(selectedProject.id)) && (
+								<>
+									<ProjectTasks key={selectedProject.id} projectId={selectedProject.id} ownerId={selectedProject.owner_id} refreshKey={activityVersion} onChanged={refreshActivity} />
+									<ProjectActivity key={selectedProject.id} projectId={selectedProject.id} refreshKey={activityVersion} />
+								</>
+							)}
 
 							{/* Action Button */}
 							<div className='border-t pt-6'>

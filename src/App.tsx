@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from './contexts/AuthContext'
 import { initialRecoveryRedirect } from './lib/supabase'
 import { Landing } from './components/Layout/Landing'
@@ -12,6 +12,7 @@ import { ProfileForm } from './components/Profile/ProfileForm'
 import { StudentsFeed } from './components/Feed/StudentsFeed'
 import { Chat } from './components/Chat/Chat'
 import { ProjectsFeed } from './components/Projects/ProjectsFeed'
+import { TaskCalendar } from './components/Calendar/TaskCalendar'
 
 function App() {
 	const { user, loading } = useAuth()
@@ -19,6 +20,12 @@ function App() {
 		'login',
 	)
 	const [currentPage, setCurrentPage] = useState<AppPage>('landing')
+	const [projectToOpen, setProjectToOpen] = useState<string | null>(null)
+	const openNotifiedProject = useCallback((projectId: string) => {
+		setProjectToOpen(projectId)
+		setCurrentPage('projects')
+	}, [])
+	const clearNotifiedProject = useCallback(() => setProjectToOpen(null), [])
 
 	useEffect(() => {
 		if (user && currentPage === 'landing') {
@@ -79,10 +86,11 @@ function App() {
 
 	return (
 		<div className='min-h-screen bg-[var(--bg)]'>
-			<Header currentPage={currentPage} onNavigate={setCurrentPage} />
+			<Header currentPage={currentPage} onNavigate={setCurrentPage} onOpenProject={openNotifiedProject} />
 			<main>
 				{currentPage === 'feed' && <StudentsFeed />}
-				{currentPage === 'projects' && <ProjectsFeed />}
+				{currentPage === 'projects' && <ProjectsFeed projectToOpen={projectToOpen} onProjectOpened={clearNotifiedProject} />}
+				{currentPage === 'calendar' && <TaskCalendar onOpenProject={openNotifiedProject} />}
 				{currentPage === 'profile' && <ProfileForm />}
 				{currentPage === 'chat' && <Chat />}
 			</main>

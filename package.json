@@ -10,7 +10,8 @@
 		"deploy": "gh-pages -d dist",
 		"lint": "eslint .",
 		"preview": "vite preview",
-		"typecheck": "tsc --noEmit -p tsconfig.app.json"
+		"typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.test.json",
+		"test": "node --test tests/taskUtils.test.ts"
 	},
 	"dependencies": {
 		"@supabase/supabase-js": "^2.57.4",
@@ -20,6 +21,7 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.9.1",
+		"@types/node": "^26.6.5",
 		"@types/react": "^18.3.5",
 		"@types/react-dom": "^18.3.0",
 		"@vitejs/plugin-react": "^4.3.1",

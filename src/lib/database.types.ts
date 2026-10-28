@@ -6,6 +6,8 @@ export type Json =
 	| { [key: string]: Json | undefined }
 	| Json[]
 
+export type ProjectTaskStatus = 'todo' | 'in_progress' | 'done'
+
 export interface Database {
 	public: {
 		Tables: {
@@ -195,9 +197,165 @@ export interface Database {
 					},
 				]
 			}
+			project_activity: {
+				Row: {
+					id: string
+					project_id: string
+					actor_user_id: string | null
+					type: 'project_created' | 'application_created' | 'application_accepted' | 'application_rejected' | 'member_joined' | 'task_created' | 'task_updated' | 'task_completed' | 'deadline_changed' | 'project_completed'
+					title: string
+					description: string | null
+					metadata: Json
+					created_at: string
+				}
+				Insert: {
+					id?: string
+					project_id: string
+					actor_user_id?: string | null
+					type: 'project_created' | 'application_created' | 'application_accepted' | 'application_rejected' | 'member_joined' | 'task_created' | 'task_updated' | 'task_completed' | 'deadline_changed' | 'project_completed'
+					title: string
+					description?: string | null
+					metadata?: Json
+					created_at?: string
+				}
+				Update: {
+					id?: string
+					project_id?: string
+					actor_user_id?: string | null
+					type?: 'project_created' | 'application_created' | 'application_accepted' | 'application_rejected' | 'member_joined' | 'task_created' | 'task_updated' | 'task_completed' | 'deadline_changed' | 'project_completed'
+					title?: string
+					description?: string | null
+					metadata?: Json
+					created_at?: string
+				}
+				Relationships: [
+					{
+						foreignKeyName: 'project_activity_project_id_fkey'
+						columns: ['project_id']
+						isOneToOne: false
+						referencedRelation: 'projects'
+						referencedColumns: ['id']
+					},
+				]
+			}
+			project_tasks: {
+				Row: {
+					id: string
+					project_id: string
+					title: string
+					description: string | null
+					status: ProjectTaskStatus
+					assignee_user_id: string | null
+					created_by: string
+					due_date: string | null
+					deadline_version: number
+					created_at: string
+					updated_at: string
+				}
+				Insert: {
+					id?: string
+					project_id: string
+					title: string
+					description?: string | null
+					status?: ProjectTaskStatus
+					assignee_user_id?: string | null
+					created_by: string
+					due_date?: string | null
+					deadline_version?: number
+					created_at?: string
+					updated_at?: string
+				}
+				Update: {
+					id?: string
+					project_id?: string
+					title?: string
+					description?: string | null
+					status?: ProjectTaskStatus
+					assignee_user_id?: string | null
+					created_by?: string
+					due_date?: string | null
+					deadline_version?: number
+					created_at?: string
+					updated_at?: string
+				}
+				Relationships: [
+					{
+						foreignKeyName: 'project_tasks_project_id_fkey'
+						columns: ['project_id']
+						isOneToOne: false
+						referencedRelation: 'projects'
+						referencedColumns: ['id']
+					},
+				]
+			}
+			notifications: {
+				Row: {
+					id: string
+					user_id: string
+					type: 'application_created' | 'application_accepted' | 'application_rejected' | 'member_joined' | 'task_assigned' | 'task_deadline_soon' | 'task_overdue' | 'task_completed'
+					title: string
+					message: string
+					related_project_id: string | null
+					related_task_id: string | null
+					task_deadline_version: number | null
+					task_deadline_due_at: string | null
+					is_read: boolean
+					created_at: string
+				}
+				Insert: {
+					id?: string
+					user_id: string
+					type: 'application_created' | 'application_accepted' | 'application_rejected' | 'member_joined' | 'task_assigned' | 'task_deadline_soon' | 'task_overdue' | 'task_completed'
+					title: string
+					message: string
+					related_project_id?: string | null
+					related_task_id?: string | null
+					task_deadline_version?: number | null
+					task_deadline_due_at?: string | null
+					is_read?: boolean
+					created_at?: string
+				}
+				Update: {
+					id?: string
+					user_id?: string
+					type?: 'application_created' | 'application_accepted' | 'application_rejected' | 'member_joined' | 'task_assigned' | 'task_deadline_soon' | 'task_overdue' | 'task_completed'
+					title?: string
+					message?: string
+					related_project_id?: string | null
+					related_task_id?: string | null
+					task_deadline_version?: number | null
+					task_deadline_due_at?: string | null
+					is_read?: boolean
+					created_at?: string
+				}
+				Relationships: [
+					{
+						foreignKeyName: 'notifications_related_project_id_fkey'
+						columns: ['related_project_id']
+						isOneToOne: false
+						referencedRelation: 'projects'
+						referencedColumns: ['id']
+					},
+					{
+						foreignKeyName: 'notifications_related_task_id_fkey'
+						columns: ['related_task_id']
+						isOneToOne: false
+						referencedRelation: 'project_tasks'
+						referencedColumns: ['id']
+					},
+				]
+			}
 		}
 		Views: { [_ in never]: never }
 		Functions: {
+			set_project_task_status: {
+				Args: { p_task_id: string; p_status: ProjectTaskStatus }
+				Returns: Database['public']['Tables']['project_tasks']['Row']
+			}
+			process_project_task_deadlines: {
+				Args: Record<string, never>
+				Returns: number
+			}
 			accept_project_application: {
 				Args: { p_application_id: string }
 				Returns: Database['public']['Tables']['projects']['Row']
