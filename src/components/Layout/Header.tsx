@@ -35,16 +35,16 @@ export function Header({ currentPage, onNavigate, onOpenProject }: HeaderProps) 
 	return (
 		<header className='bg-[var(--card)] shadow-sm border-b border-[var(--border)]'>
 			<div className='max-w-7xl mx-auto px-4 py-4'>
-				<div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
+				<div className='flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-4'>
 					<button
 						onClick={() => onNavigate('feed')}
-						className='text-left text-lg sm:text-xl lg:text-2xl font-bold text-[var(--accent)] hover:opacity-90 transition'
+						className='text-left text-lg sm:text-xl xl:basis-64 xl:shrink-0 font-bold leading-tight text-[var(--accent)] hover:opacity-90 transition'
 					>
 						Платформа междисциплинарных проектов
 					</button>
 
-					<div className='flex w-full lg:w-auto min-w-0 items-center gap-2'>
-					<nav className='flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1 lg:pb-0'>
+					<div className='flex w-full min-w-0 items-center gap-2 xl:w-auto xl:flex-1'>
+					<nav className='flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1 xl:gap-1 xl:overflow-visible xl:pb-0'>
 						<button
 							type='button'
 							onClick={toggleTheme}
@@ -60,7 +60,7 @@ export function Header({ currentPage, onNavigate, onOpenProject }: HeaderProps) 
 
 						<button
 							onClick={() => onNavigate('projects')}
-							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 xl:px-2 py-2 rounded-lg transition ${
 								currentPage === 'projects'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -72,7 +72,7 @@ export function Header({ currentPage, onNavigate, onOpenProject }: HeaderProps) 
 
 						<button
 							onClick={() => onNavigate('feed')}
-							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 xl:px-2 py-2 rounded-lg transition ${
 								currentPage === 'feed'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -84,7 +84,7 @@ export function Header({ currentPage, onNavigate, onOpenProject }: HeaderProps) 
 
 						<button
 							onClick={() => onNavigate('calendar')}
-							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 xl:px-2 py-2 rounded-lg transition ${
 								currentPage === 'calendar'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -96,7 +96,7 @@ export function Header({ currentPage, onNavigate, onOpenProject }: HeaderProps) 
 
 						<button
 							onClick={() => onNavigate('chat')}
-							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 xl:px-2 py-2 rounded-lg transition ${
 								currentPage === 'chat'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -108,7 +108,7 @@ export function Header({ currentPage, onNavigate, onOpenProject }: HeaderProps) 
 
 						<button
 							onClick={() => onNavigate('profile')}
-							className={`flex shrink-0 items-center space-x-2 px-3 py-2 rounded-lg transition ${
+							className={`flex shrink-0 items-center space-x-2 px-3 xl:px-2 py-2 rounded-lg transition ${
 								currentPage === 'profile'
 									? 'bg-[var(--accent)] text-white'
 									: 'text-[var(--text)] hover:bg-[var(--accent-2)]'
@@ -120,7 +120,7 @@ export function Header({ currentPage, onNavigate, onOpenProject }: HeaderProps) 
 
 						<button
 							onClick={handleLogout}
-							className='flex shrink-0 items-center space-x-2 px-3 py-2 text-red-600 hover:bg-red-500/10 rounded-lg transition'
+							className='flex shrink-0 items-center space-x-2 px-3 xl:px-2 py-2 text-red-600 hover:bg-red-500/10 rounded-lg transition'
 						>
 							<LogOut className='w-5 h-5' />
 							<span className='font-medium'>Выйти</span>
