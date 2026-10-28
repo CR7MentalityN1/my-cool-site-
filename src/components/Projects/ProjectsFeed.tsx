@@ -22,7 +22,7 @@ import {
 	type Recommendation,
 } from '../../lib/recommendations'
 import { safeExternalUrl } from '../../lib/urls'
-import { getUserErrorMessage } from '../../lib/userErrors'
+import { getProjectAcceptanceErrorMessage, getUserErrorMessage } from '../../lib/userErrors'
 import ProjectActivity from './ProjectActivity'
 import { ProjectTasks } from './ProjectTasks'
 
@@ -258,6 +258,10 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 	const [applications, setApplications] = useState<ApplicationWithProfile[]>([])
 	const [isViewModalOpen, setIsViewModalOpen] = useState(false)
 	const roleOptionsRef = useRef<HTMLDivElement>(null)
+	const [selectedRoleKey, setSelectedRoleKey] = useState<string | null>(null)
+	const [applicationFeedback, setApplicationFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null)
+	const [isApplying, setIsApplying] = useState(false)
+	const applyLock = useRef(false)
 	const [adminEditForm, setAdminEditForm] = useState<AdminEditForm>({
 		description: '',
 		image_url: '',
@@ -285,6 +289,13 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 		RecommendedParticipant[]
 	>([])
 	const [recommendationsLoading, setRecommendationsLoading] = useState(false)
+
+	useEffect(() => {
+		if (!isViewModalOpen || !applicationFeedback) return
+		const frame = requestAnimationFrame(() =>
+			roleOptionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+		return () => cancelAnimationFrame(frame)
+	}, [isViewModalOpen, applicationFeedback])
 
 	const projectRecommendations = useMemo(() => {
 		const recommendations = new Map<string, Recommendation>()
@@ -349,6 +360,8 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 			if (cancelled) return
 			if (project) {
 				setSelectedProject(project)
+				setSelectedRoleKey(null)
+				setApplicationFeedback(null)
 				setIsAdminModalOpen(false)
 				setIsViewModalOpen(true)
 			} else {
@@ -453,59 +466,84 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 	])
 
 	const handleApply = async (projectId: string, roleAppliedFor?: string) => {
-		if (!user) {
-			alert('Требуется авторизация')
-			return
-		}
-
-		const project = projects.find(p => p.id === projectId)
-		if (!project) return
-		if (project.status && project.status !== 'recruiting') {
-			alert('Набор в этот проект уже закрыт')
+		if (applyLock.current) return
+		const project = selectedProject?.id === projectId
+			? selectedProject : projects.find(p => p.id === projectId)
+		if (!project) {
+			setApplicationFeedback({ type: 'error', message: 'Проект не найден или недоступен' })
 			return
 		}
 		const roleKey = roleAppliedFor?.trim()
+		if (!roleKey) {
+			setApplicationFeedback({ type: 'error', message: 'Выберите роль, на которую хотите подать заявку' })
+			return
+		}
 		const selectedRole = project.required_roles?.map(parseStoredRole)
 			.find(role => role.key === roleKey)
-		if (!roleKey || !selectedRole || selectedRole.taken >= selectedRole.count) {
-			alert('Выберите свободную роль')
+		if (!selectedRole || selectedRole.taken >= selectedRole.count) {
+			setApplicationFeedback({ type: 'error', message: selectedRole
+				? 'Эта роль уже занята. Выберите другую свободную роль.'
+				: 'Выбранная роль больше недоступна. Выберите другую.' })
+			return
+		}
+		if (!user) {
+			setApplicationFeedback({ type: 'error', message: 'Войдите в аккаунт, чтобы подать заявку' })
+			alert('Требуется авторизация')
+			return
+		}
+		if (project.status && project.status !== 'recruiting') {
+			setApplicationFeedback({ type: 'error', message: 'Набор в этот проект уже закрыт' })
 			return
 		}
 
-		// Membership is keyed by user_id, never by a display name.
-		const { data: membership, error: membershipError } = await supabase
-			.from('project_members').select('id')
-			.eq('project_id', projectId).eq('user_id', user.id).maybeSingle()
-		if (membershipError) {
-			console.error('Error checking membership:', membershipError)
-			alert('Не удалось проверить участие в проекте')
-			return
-		}
-		if (project.owner_id === user.id || membership) {
-			alert('Вы уже в этой команде')
-			return
-		}
-
-		// Check if already has application
-		const { data: existingApp, error: applicationError } = await supabase
-			.from('project_applications')
-			.select('*')
-			.eq('project_id', projectId)
-			.eq('user_id', user.id)
-			.eq('status', 'pending')
-			.maybeSingle()
-		if (applicationError) {
-			console.error('Error checking application:', applicationError)
-			alert('Не удалось проверить заявку')
-			return
-		}
-
-		if (existingApp) {
-			alert('Вы уже подали заявку на этот проект')
-			return
-		}
-
+		applyLock.current = true
+		setIsApplying(true)
+		setApplicationFeedback(null)
 		try {
+			// Re-check availability before sending, as the project may have changed while the modal was open.
+			const { data: latestProject, error: projectError } = await supabase
+				.from('projects').select('status, required_roles').eq('id', projectId).maybeSingle()
+			if (projectError) throw projectError
+			if (!latestProject) {
+				setApplicationFeedback({ type: 'error', message: 'Проект не найден или недоступен' })
+				return
+			}
+			if (latestProject.status && latestProject.status !== 'recruiting') {
+				setApplicationFeedback({ type: 'error', message: 'Набор в этот проект уже закрыт' })
+				return
+			}
+			const currentRole = (latestProject.required_roles || []).map(parseStoredRole)
+				.find(role => role.key === roleKey)
+			if (!currentRole || currentRole.taken >= currentRole.count) {
+				setApplicationFeedback({ type: 'error', message: currentRole
+					? 'Эта роль уже занята. Выберите другую свободную роль.'
+					: 'Выбранная роль больше недоступна. Выберите другую.' })
+				setSelectedRoleKey(null)
+				setSelectedProject(previous => previous?.id === projectId
+					? { ...previous, required_roles: latestProject.required_roles } : previous)
+				return
+			}
+
+			// Membership is keyed by user_id, never by a display name.
+			const { data: membership, error: membershipError } = await supabase
+				.from('project_members').select('id')
+				.eq('project_id', projectId).eq('user_id', user.id).maybeSingle()
+			if (membershipError) throw membershipError
+			if (project.owner_id === user.id || membership) {
+				setApplicationFeedback({ type: 'error', message: 'Вы уже в этой команде' })
+				return
+			}
+
+			const { data: existingApp, error: applicationError } = await supabase
+				.from('project_applications').select('id')
+				.eq('project_id', projectId).eq('user_id', user.id).eq('status', 'pending')
+				.maybeSingle()
+			if (applicationError) throw applicationError
+			if (existingApp) {
+				setApplicationFeedback({ type: 'error', message: 'Вы уже подали заявку на этот проект' })
+				return
+			}
+
 			const insertData: ProjectApplicationInsertData = {
 				project_id: projectId,
 				user_id: user.id,
@@ -521,17 +559,16 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 			const { error } = await supabase
 				.from('project_applications')
 				.insert([insertDataWithRole])
-
-			if (error) {
-				console.error('Error applying to project:', error)
-				alert(getUserErrorMessage(error, 'Не удалось подать заявку. Попробуйте ещё раз.'))
-			} else {
-				alert('Заявка успешно подана!')
-				void refreshProjectMetadata()
-			}
+			if (error) throw error
+			setApplicationFeedback({ type: 'success', message: 'Заявка успешно отправлена' })
+			setUserProjectStatuses(previous => ({ ...previous, [projectId]: 'has_application' }))
+			void refreshProjectMetadata()
 		} catch (error) {
-			console.error('Error:', error)
-			alert(getUserErrorMessage(error, 'Не удалось подать заявку. Попробуйте ещё раз.'))
+			console.error('Error applying to project:', error)
+			setApplicationFeedback({ type: 'error', message: getUserErrorMessage(error, 'Не удалось подать заявку. Попробуйте ещё раз.') })
+		} finally {
+			applyLock.current = false
+			setIsApplying(false)
 		}
 	}
 
@@ -717,6 +754,8 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 
 	const openViewModal = (project: Project) => {
 		setSelectedProject(project)
+		setSelectedRoleKey(null)
+		setApplicationFeedback(null)
 		setIsViewModalOpen(true)
 	}
 
@@ -730,7 +769,7 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 			return
 		}
 		openViewModal(project)
-		requestAnimationFrame(() => roleOptionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+		setApplicationFeedback({ type: 'error', message: 'Выберите роль, на которую хотите подать заявку' })
 	}
 
 	const handleAcceptApplication = async (
@@ -762,7 +801,7 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 			void fetchProjects()
 		} catch (error) {
 			console.error('Error accepting application:', error)
-			alert(getUserErrorMessage(error, 'Не удалось принять заявку. Попробуйте ещё раз.'))
+			alert(getProjectAcceptanceErrorMessage(error))
 		}
 	}
 
@@ -936,7 +975,7 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 		}))
 	}
 
-	const renderProjectButton = (project: Project) => {
+	const renderProjectButton = (project: Project, inModal = false) => {
 		const projectStatus = getProjectStatus(project)
 		const hasFreeRole = (project.required_roles || []).some(raw => {
 			const role = parseStoredRole(raw)
@@ -959,11 +998,17 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 			}
 			return (
 				<button
-					onClick={() => openRoleSelection(project)}
-					className='flex-1 bg-[var(--accent)] text-white py-2 rounded-2xl font-bold hover:opacity-90 transition flex items-center justify-center gap-2'
+					type='button'
+					onClick={event => {
+						event.stopPropagation()
+						if (inModal) void handleApply(project.id, selectedRoleKey || undefined)
+						else openRoleSelection(project)
+					}}
+					disabled={inModal && isApplying}
+					className='flex-1 bg-[var(--accent)] text-white py-2 rounded-2xl font-bold hover:opacity-90 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-wait'
 				>
 					<UserPlus className='w-4 h-4' />
-					Подать заявку
+					{inModal && isApplying ? 'Отправка...' : 'Подать заявку'}
 				</button>
 			)
 		}
@@ -1011,11 +1056,17 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 
 		return (
 			<button
-				onClick={() => openRoleSelection(project)}
-				className='flex-1 bg-[var(--accent)] text-white py-2 rounded-2xl font-bold hover:opacity-90 transition flex items-center justify-center gap-2'
+				type='button'
+				onClick={event => {
+					event.stopPropagation()
+					if (inModal) void handleApply(project.id, selectedRoleKey || undefined)
+					else openRoleSelection(project)
+				}}
+				disabled={inModal && isApplying}
+				className='flex-1 bg-[var(--accent)] text-white py-2 rounded-2xl font-bold hover:opacity-90 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-wait'
 			>
 				<UserPlus className='w-4 h-4' />
-				Подать заявку
+				{inModal && isApplying ? 'Отправка...' : 'Подать заявку'}
 			</button>
 		)
 	}
@@ -1567,7 +1618,8 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 							</h2>
 							<button
 								onClick={() => setIsViewModalOpen(false)}
-								className='text-[var(--muted)] hover:text-[var(--text)] transition'
+								disabled={isApplying}
+								className='text-[var(--muted)] hover:text-[var(--text)] transition disabled:opacity-50'
 							>
 								<X className='w-6 h-6' />
 							</button>
@@ -1627,38 +1679,49 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 							{/* Required Roles */}
 							{selectedProject.required_roles &&
 								selectedProject.required_roles.length > 0 && (
-									<div ref={roleOptionsRef}>
+									<div
+										ref={roleOptionsRef}
+										className={applicationFeedback?.type === 'error'
+											? 'rounded-2xl border border-red-500/70 bg-red-500/5 p-3'
+											: ''}
+									>
 										<h3 className='text-lg font-bold text-[var(--text)] mb-3'>
 											Необходимые роли (нажмите, чтобы выбрать):
 										</h3>
 										<div className='flex flex-wrap gap-3'>
 											{selectedProject.required_roles.map((rawRole, idx) => {
-											const role = parseStoredRole(rawRole)
-											const isFull = role.taken >= role.count
+												const role = parseStoredRole(rawRole)
+												const isFull = role.taken >= role.count
 												const status = getUserProjectStatus(selectedProject)
-												const canApply =
+												const canSelect =
 													status === 'can_apply' &&
-													!isFull &&
 													getProjectStatus(selectedProject) === 'recruiting'
 
 												return (
 													<button
 														key={idx}
 														type='button'
+														aria-pressed={!isFull && selectedRoleKey === role.key}
+														title={isFull ? 'Эта роль уже занята' : undefined}
 														onClick={e => {
 															e.stopPropagation()
-															if (canApply) {
-																handleApply(selectedProject.id, role.key)
-																setIsViewModalOpen(false) // Закрываем модалку после подачи
+															if (isFull) {
+																setSelectedRoleKey(null)
+																setApplicationFeedback({ type: 'error', message: 'Эта роль уже занята. Выберите другую свободную роль.' })
+															} else {
+																setSelectedRoleKey(role.key)
+																setApplicationFeedback(null)
 															}
 														}}
-														disabled={!canApply}
+														disabled={!canSelect || isApplying}
 														className={`
                 px-4 py-2 rounded-xl text-sm font-bold transition-all
                 ${
-									canApply
-										? 'bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20 hover:bg-[var(--accent)] hover:text-white cursor-pointer active:scale-95'
-										: 'bg-gray-500/10 text-gray-500 cursor-not-allowed opacity-60'
+															selectedRoleKey === role.key && !isFull
+																? 'bg-[var(--accent)] text-white border border-[var(--accent)]'
+																: canSelect && !isFull
+																	? 'bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20 hover:bg-[var(--accent)] hover:text-white cursor-pointer active:scale-95'
+																	: 'bg-gray-500/10 text-gray-500 cursor-not-allowed opacity-60'
 								}
               `}
 													>
@@ -1672,6 +1735,20 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 												)
 											})}
 										</div>
+										{selectedRoleKey && !applicationFeedback && (
+											<p className='mt-3 text-sm text-[var(--muted)]'>
+												Роль выбрана. Нажмите «Подать заявку» ниже.
+											</p>
+										)}
+										{applicationFeedback && (
+											<p
+												role={applicationFeedback.type === 'error' ? 'alert' : 'status'}
+												className={`mt-3 text-sm font-medium ${applicationFeedback.type === 'error'
+													? 'text-red-700 dark:text-red-300' : 'text-green-700 dark:text-green-300'}`}
+											>
+												{applicationFeedback.message}
+											</p>
+										)}
 									</div>
 								)}
 
@@ -1707,7 +1784,7 @@ export function ProjectsFeed({ projectToOpen, onProjectOpened }: { projectToOpen
 							{/* Action Button */}
 							<div className='border-t pt-6'>
 								<div className='flex gap-3'>
-									{renderProjectButton(selectedProject)}
+									{renderProjectButton(selectedProject, true)}
 								</div>
 							</div>
 						</div>
